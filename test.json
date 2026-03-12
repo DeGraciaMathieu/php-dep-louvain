@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "version": "1.0",
+    "generated_at": "2026-02-26T10:00:00+00:00",
+    "analyzed_path": "/demo/app",
+    "file_count": 12,
+    "class_count": 10,
+    "node_count": 14,
+    "edge_count": 18,
+    "warning_count": 0
+  },
+  "classes": [
+    { "fqcn": "App\\Controller\\UserController",    "type": "class",     "file": "/UserController.php",    "line": 1, "dependencies": ["App\\Service\\UserService"],    "dependants": [] },
+    { "fqcn": "App\\Controller\\OrderController",   "type": "class",     "file": "/OrderController.php",   "line": 1, "dependencies": ["App\\Service\\OrderService"],   "dependants": [] },
+    { "fqcn": "App\\Service\\UserService",          "type": "class",     "file": "/UserService.php",        "line": 1, "dependencies": ["App\\Repository\\UserRepository", "Psr\\Log\\LoggerInterface"], "dependants": ["App\\Controller\\UserController"] },
+    { "fqcn": "App\\Service\\OrderService",         "type": "class",     "file": "/OrderService.php",       "line": 1, "dependencies": ["App\\Repository\\OrderRepository", "App\\Service\\UserService"],  "dependants": ["App\\Controller\\OrderController"] },
+    { "fqcn": "App\\Repository\\UserRepository",    "type": "class",     "file": "/UserRepository.php",     "line": 1, "dependencies": ["Doctrine\\ORM\\EntityManagerInterface"], "dependants": ["App\\Service\\UserService"] },
+    { "fqcn": "App\\Repository\\OrderRepository",   "type": "class",     "file": "/OrderRepository.php",    "line": 1, "dependencies": ["Doctrine\\ORM\\EntityManagerInterface"], "dependants": ["App\\Service\\OrderService"] },
+    { "fqcn": "App\\Entity\\User",                  "type": "class",     "file": "/User.php",               "line": 1, "dependencies": [], "dependants": ["App\\Repository\\UserRepository"] },
+    { "fqcn": "App\\Entity\\Order",                 "type": "class",     "file": "/Order.php",              "line": 1, "dependencies": ["App\\Entity\\User"], "dependants": ["App\\Repository\\OrderRepository"] },
+    { "fqcn": "App\\Event\\UserCreatedEvent",       "type": "class",     "file": "/UserCreatedEvent.php",   "line": 1, "dependencies": ["App\\Entity\\User"], "dependants": [] },
+    { "fqcn": "App\\Listener\\UserCreatedListener", "type": "class",     "file": "/UserCreatedListener.php","line": 1, "dependencies": ["App\\Event\\UserCreatedEvent", "App\\Service\\UserService"], "dependants": [] }
+  ],
+  "edges": [
+    { "source": "App\\Controller\\UserController",    "target": "App\\Service\\UserService",             "type": "param_type",    "confidence": "certain", "file": "/UserController.php",    "line": 10, "metadata": {} },
+    { "source": "App\\Controller\\OrderController",   "target": "App\\Service\\OrderService",            "type": "param_type",    "confidence": "certain", "file": "/OrderController.php",   "line": 10, "metadata": {} },
+    { "source": "App\\Service\\UserService",          "target": "App\\Repository\\UserRepository",       "type": "param_type",    "confidence": "certain", "file": "/UserService.php",        "line": 12, "metadata": {} },
+    { "source": "App\\Service\\UserService",          "target": "Psr\\Log\\LoggerInterface",             "type": "param_type",    "confidence": "certain", "file": "/UserService.php",        "line": 13, "metadata": {} },
+    { "source": "App\\Service\\OrderService",         "target": "App\\Repository\\OrderRepository",      "type": "param_type",    "confidence": "certain", "file": "/OrderService.php",       "line": 12, "metadata": {} },
+    { "source": "App\\Service\\OrderService",         "target": "App\\Service\\UserService",             "type": "method_call",   "confidence": "high",    "file": "/OrderService.php",       "line": 25, "metadata": {} },
+    { "source": "App\\Repository\\UserRepository",    "target": "Doctrine\\ORM\\EntityManagerInterface", "type": "param_type",    "confidence": "certain", "file": "/UserRepository.php",     "line": 8,  "metadata": {} },
+    { "source": "App\\Repository\\UserRepository",    "target": "App\\Entity\\User",                     "type": "return_type",   "confidence": "certain", "file": "/UserRepository.php",     "line": 20, "metadata": {} },
+    { "source": "App\\Repository\\OrderRepository",   "target": "Doctrine\\ORM\\EntityManagerInterface", "type": "param_type",    "confidence": "certain", "file": "/OrderRepository.php",    "line": 8,  "metadata": {} },
+    { "source": "App\\Repository\\OrderRepository",   "target": "App\\Entity\\Order",                    "type": "return_type",   "confidence": "certain", "file": "/OrderRepository.php",    "line": 20, "metadata": {} },
+    { "source": "App\\Entity\\Order",                 "target": "App\\Entity\\User",                     "type": "property_type", "confidence": "certain", "file": "/Order.php",              "line": 14, "metadata": {} },
+    { "source": "App\\Event\\UserCreatedEvent",       "target": "App\\Entity\\User",                     "type": "property_type", "confidence": "certain", "file": "/UserCreatedEvent.php",   "line": 8,  "metadata": {} },
+    { "source": "App\\Listener\\UserCreatedListener", "target": "App\\Event\\UserCreatedEvent",          "type": "param_type",    "confidence": "certain", "file": "/UserCreatedListener.php","line": 10, "metadata": {} },
+    { "source": "App\\Listener\\UserCreatedListener", "target": "App\\Service\\UserService",             "type": "method_call",   "confidence": "high",    "file": "/UserCreatedListener.php","line": 18, "metadata": {} }
+  ],
+  "warnings": []
+}
