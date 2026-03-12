@@ -17,7 +17,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { buildGraph }                  from './graph.js'
 import { louvain, computeModularity }  from './louvain.js'
-import { generateHtml }                from './visualize.js'
+import { buildVisData, generateHtml }  from './visualize.js'
 import type { InputData }              from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -210,36 +210,17 @@ function main() {
   } else if (format === 'html') {
     const jsonResult = toJsonOutputRaw(data, g.labels, g.isInternal, g.adj, community, Q)
 
-    // Attach community id back to each node using the (potentially re-sorted) result
+    // Remap community ids to match the sorted order in jsonResult
     const commIdByLabel = new Map<string, number>()
     for (const comm of jsonResult.communities) {
       for (const m of comm.members)          commIdByLabel.set(m, comm.id)
       for (const m of comm.external_members) commIdByLabel.set(m, comm.id)
     }
+    const remappedCommunity = Int32Array.from(
+      g.labels, label => commIdByLabel.get(label) ?? 0
+    )
 
-    const classMap = new Map(data.classes.map(c => [c.fqcn, c]))
-
-    const visNodes = g.labels.map((label, i) => ({
-      id:        label,
-      community: commIdByLabel.get(label) ?? community[i],
-      internal:  g.isInternal[i],
-      type:      classMap.get(label)?.type ?? 'external',
-      short:     label.split('\\').pop() ?? label,
-    }))
-
-    const visLinks = [] as Array<{ source: string; target: string; weight: number }>
-    for (let i = 0; i < g.n; i++) {
-      for (const { to, weight } of g.adj[i]) {
-        if (to > i) visLinks.push({ source: g.labels[i], target: g.labels[to], weight })
-      }
-    }
-
-    output = generateHtml({
-      meta:        jsonResult.meta,
-      nodes:       visNodes,
-      links:       visLinks,
-      communities: jsonResult.communities,
-    })
+    output = generateHtml(buildVisData(jsonResult, g, remappedCommunity))
 
   } else {
     output = JSON.stringify(

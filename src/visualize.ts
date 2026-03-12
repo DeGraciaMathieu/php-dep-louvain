@@ -11,8 +11,9 @@ export interface VisData {
   nodes: Array<{
     id:        string
     community: number
-    internal:  boolean
-    type:      string
+    size:      number
+    namespace: string
+    density:   number
     short:     string
   }>
   links: Array<{
@@ -36,20 +37,35 @@ export function buildVisData(
   g: Graph,
   community: Int32Array,
 ): VisData {
-  const nodes = g.labels.map((label, i) => ({
-    id:        label,
-    community: community[i],
-    internal:  g.isInternal[i],
-    type:      'external',
-    short:     label.split('\\').pop() ?? label,
+  // One node per community
+  const nodes: VisData['nodes'] = jsonOutput.communities.map(c => ({
+    id:        `community-${c.id}`,
+    community: c.id,
+    size:      c.internal_count,
+    namespace: c.namespace,
+    density:   c.density,
+    short:     'C' + c.id,
   }))
 
-  const links: VisData['links'] = []
+  // Aggregate class-level edges into community-level edges
+  const commWeights = new Map<string, number>()
   for (let i = 0; i < g.n; i++) {
+    const ci = community[i]
     for (const { to, weight } of g.adj[i]) {
-      if (to > i) links.push({ source: g.labels[i], target: g.labels[to], weight })
+      if (to <= i) continue
+      const cj = community[to]
+      if (ci === cj) continue
+      const a   = Math.min(ci, cj)
+      const b   = Math.max(ci, cj)
+      const key = `${a}|${b}`
+      commWeights.set(key, (commWeights.get(key) ?? 0) + weight)
     }
   }
+
+  const links: VisData['links'] = Array.from(commWeights.entries()).map(([key, weight]) => {
+    const [a, b] = key.split('|')
+    return { source: `community-${a}`, target: `community-${b}`, weight }
+  })
 
   return {
     meta:        jsonOutput.meta,
@@ -96,11 +112,11 @@ body{font-family:system-ui,-apple-system,sans-serif;display:flex;height:100vh;ov
 /* ── Main ── */
 #main{flex:1;position:relative;overflow:hidden}
 svg{width:100%;height:100%}
-.hull{stroke-width:0}
 .link{stroke:#ced4da}
-.node circle{stroke-width:1.5;cursor:grab;filter:drop-shadow(0 1px 2px rgba(0,0,0,.15))}
+.node circle{stroke-width:2;cursor:grab;filter:drop-shadow(0 2px 4px rgba(0,0,0,.2))}
 .node circle:active{cursor:grabbing}
-.node text{pointer-events:none;font-size:10px;fill:#343a40;font-weight:500}
+.node text{pointer-events:none;font-size:11px;fill:#212529;font-weight:600}
+.node .sub{font-size:9px;fill:#6c757d;font-weight:400}
 
 /* ── Tooltip ── */
 #tooltip{position:absolute;background:rgba(33,37,41,.88);color:#f8f9fa;
@@ -136,9 +152,7 @@ svg{width:100%;height:100%}
   <div id="tooltip"></div>
   <div id="statsbar" id="statsbar"></div>
   <div id="controls">
-    <button id="btn-ext" class="active">External nodes</button>
     <button id="btn-labels" class="active">Labels</button>
-    <button id="btn-hulls" class="active">Hulls</button>
     <button id="btn-reset">⟳ Reset</button>
   </div>
 </div>
@@ -187,12 +201,18 @@ communities.forEach(c => {
 
 function highlightCommunity(commId) {
   nodeEl.selectAll('circle')
-    .attr('fill-opacity', d => commId === null ? (d.internal ? 0.88 : 0.35)
-                                                : (d.community === commId ? 0.95 : 0.1))
-    .attr('stroke-opacity', d => commId === null ? 1 : (d.community === commId ? 1 : 0.15));
-  linkEl.attr('stroke-opacity', d => commId === null ? 0.35
-    : (d.source.community === commId && d.target.community === commId ? 0.8 : 0.05));
+    .attr('fill-opacity', d => commId === null ? 0.85 : (d.community === commId ? 0.95 : 0.15))
+    .attr('stroke-opacity', d => commId === null ? 1 : (d.community === commId ? 1 : 0.2));
+  linkEl
+    .attr('stroke-opacity', d => commId === null ? 0.5
+      : (d.source.community === commId || d.target.community === commId ? 0.9 : 0.05))
+    .attr('stroke', d => commId === null ? '#ced4da'
+      : (d.source.community === commId || d.target.community === commId
+          ? COLORS[commId % COLORS.length] : '#ced4da'));
 }
+
+// ── Node radius helper ─────────────────────────────────────────────────────
+function nodeRadius(d) { return 14 + Math.sqrt(d.size) * 3; }
 
 // ── SVG setup ──────────────────────────────────────────────────────────────
 const svg  = d3.select('#graph');
@@ -204,41 +224,26 @@ const zoomBehavior = d3.zoom()
   .on('zoom', e => root.attr('transform', e.transform));
 svg.call(zoomBehavior);
 
-const root     = svg.append('g');
-const hullsG   = root.append('g').attr('class', 'hulls-group');
-const linksG   = root.append('g');
-const nodesG   = root.append('g');
+const root   = svg.append('g');
+const linksG = root.append('g');
+const nodesG = root.append('g');
 
 // ── Force simulation ───────────────────────────────────────────────────────
-const sim = d3.forceSimulation(nodes)
-  .force('link',    d3.forceLink(links).id(d => d.id).distance(90).strength(0.5))
-  .force('charge',  d3.forceManyBody().strength(-250))
-  .force('center',  d3.forceCenter(W / 2, H / 2))
-  .force('collide', d3.forceCollide(24))
-  .force('group',   groupForce(0.12));
+const maxWeight = d3.max(links, d => d.weight) || 1;
 
-function groupForce(alpha) {
-  return function() {
-    const cx = {}, cy = {}, cnt = {};
-    nodes.forEach(n => {
-      const c = n.community;
-      cx[c]  = (cx[c]  || 0) + n.x;
-      cy[c]  = (cy[c]  || 0) + n.y;
-      cnt[c] = (cnt[c] || 0) + 1;
-    });
-    Object.keys(cx).forEach(c => { cx[c] /= cnt[c]; cy[c] /= cnt[c]; });
-    nodes.forEach(n => {
-      n.vx += (cx[n.community] - n.x) * alpha;
-      n.vy += (cy[n.community] - n.y) * alpha;
-    });
-  };
-}
+const sim = d3.forceSimulation(nodes)
+  .force('link',    d3.forceLink(links).id(d => d.id)
+                      .distance(d => 160 - d.weight / maxWeight * 60)
+                      .strength(d => 0.3 + d.weight / maxWeight * 0.4))
+  .force('charge',  d3.forceManyBody().strength(d => -600 - d.size * 10))
+  .force('center',  d3.forceCenter(W / 2, H / 2))
+  .force('collide', d3.forceCollide(d => nodeRadius(d) + 10));
 
 // ── Links ──────────────────────────────────────────────────────────────────
 const linkEl = linksG.selectAll('line').data(links).join('line')
   .attr('class', 'link')
-  .attr('stroke-width', d => Math.max(0.5, d.weight * 1.8))
-  .attr('stroke-opacity', 0.35);
+  .attr('stroke-width', d => Math.max(1, Math.sqrt(d.weight) * 2))
+  .attr('stroke-opacity', 0.5);
 
 // ── Nodes ──────────────────────────────────────────────────────────────────
 const nodeEl = nodesG.selectAll('g').data(nodes).join('g').attr('class', 'node')
@@ -248,23 +253,28 @@ const nodeEl = nodesG.selectAll('g').data(nodes).join('g').attr('class', 'node')
     .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
 
 nodeEl.append('circle')
-  .attr('r',            d => d.internal ? 11 : 7)
-  .attr('fill',         d => COLORS[d.community % COLORS.length])
-  .attr('fill-opacity', d => d.internal ? 0.88 : 0.35)
-  .attr('stroke',       d => COLORS[d.community % COLORS.length])
+  .attr('r',             d => nodeRadius(d))
+  .attr('fill',          d => COLORS[d.community % COLORS.length])
+  .attr('fill-opacity',  0.85)
+  .attr('stroke',        d => COLORS[d.community % COLORS.length])
   .attr('stroke-opacity', 1);
 
 const labelEl = nodeEl.append('text')
-  .attr('dy', 22).attr('text-anchor', 'middle')
-  .text(d => d.short);
+  .attr('dy', '-0.2em').attr('text-anchor', 'middle')
+  .text(d => 'C' + d.community);
+
+nodeEl.append('text')
+  .attr('class', 'sub')
+  .attr('dy', '1em').attr('text-anchor', 'middle')
+  .text(d => d.size + ' cls');
 
 const tooltip = document.getElementById('tooltip');
 nodeEl.on('mouseover', (e, d) => {
     tooltip.style.display = 'block';
     tooltip.innerHTML =
-      '<strong>' + d.id + '</strong><br>' +
-      (d.internal ? d.type : 'external') +
-      ' &nbsp;·&nbsp; Community ' + d.community;
+      '<strong>Community ' + d.community + '</strong><br>' +
+      d.namespace + '<br>' +
+      d.size + ' classes &nbsp;·&nbsp; density ' + d.density.toFixed(2);
   })
   .on('mousemove', e => {
     const r = main.getBoundingClientRect();
@@ -273,72 +283,25 @@ nodeEl.on('mouseover', (e, d) => {
   })
   .on('mouseout', () => { tooltip.style.display = 'none'; });
 
-// ── Hulls ──────────────────────────────────────────────────────────────────
-let showHulls = true;
-
-function drawHulls() {
-  hullsG.selectAll('path').remove();
-  if (!showHulls) return;
-
-  const byComm = {};
-  nodes.forEach(n => {
-    if (!byComm[n.community]) byComm[n.community] = [];
-    byComm[n.community].push(n);
-  });
-
-  Object.entries(byComm).forEach(([c, ns]) => {
-    const pad = 26;
-    const pts = ns.flatMap(n => [
-      [n.x - pad, n.y - pad], [n.x + pad, n.y - pad],
-      [n.x - pad, n.y + pad], [n.x + pad, n.y + pad],
-    ]);
-    const hull = d3.polygonHull(pts);
-    if (!hull) return;
-    hullsG.append('path')
-      .attr('d', 'M' + hull.map(p => p.join(',')).join('L') + 'Z')
-      .attr('fill',         COLORS[c % COLORS.length])
-      .attr('fill-opacity', 0.07)
-      .attr('stroke',       COLORS[c % COLORS.length])
-      .attr('stroke-opacity', 0.25)
-      .attr('stroke-width', 2)
-      .attr('stroke-linejoin', 'round');
-  });
-}
-
 // ── Tick ───────────────────────────────────────────────────────────────────
 sim.on('tick', () => {
   linkEl.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
         .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
   nodeEl.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
-  drawHulls();
 });
 
 // ── Controls ───────────────────────────────────────────────────────────────
-let showExt    = true;
 let showLabels = true;
-
-document.getElementById('btn-ext').addEventListener('click', function() {
-  showExt = !showExt;
-  this.classList.toggle('active', showExt);
-  nodeEl.style('display', d => (!showExt && !d.internal) ? 'none' : null);
-  linkEl.style('display', d => (!showExt && (!d.source.internal || !d.target.internal)) ? 'none' : null);
-});
 
 document.getElementById('btn-labels').addEventListener('click', function() {
   showLabels = !showLabels;
   this.classList.toggle('active', showLabels);
   labelEl.style('display', showLabels ? null : 'none');
-});
-
-document.getElementById('btn-hulls').addEventListener('click', function() {
-  showHulls = !showHulls;
-  this.classList.toggle('active', showHulls);
-  drawHulls();
+  nodeEl.selectAll('text.sub').style('display', showLabels ? null : 'none');
 });
 
 document.getElementById('btn-reset').addEventListener('click', () => {
   svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
-  // de-highlight all communities
   document.querySelectorAll('.comm-card.active').forEach(el => el.classList.remove('active'));
   highlightCommunity(null);
 });
@@ -347,7 +310,7 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 document.getElementById('statsbar').textContent =
   'Q = ' + meta.modularity.toFixed(4) +
   '  ·  ' + meta.community_count + ' communities' +
-  '  ·  ' + meta.internal_node_count + ' / ' + meta.node_count + ' internal nodes';
+  '  ·  ' + links.length + ' inter-community links';
 
 // Resize
 window.addEventListener('resize', () => {
