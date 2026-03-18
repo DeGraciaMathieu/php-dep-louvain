@@ -60,7 +60,17 @@ npx tsx src/index.ts --internal-only --format text analysis.json
 
 ## Input format
 
-JSON produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep), a PHP dependency analyser:
+This tool expects a JSON dependency graph produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep). Run `php-dep` on your PHP project first to generate the JSON file, then pass it to `php-dep-louvain`:
+
+```bash
+# Step 1 — generate the dependency graph with php-dep
+php-dep analyse src/ --out analysis.json
+
+# Step 2 — detect communities with php-dep-louvain
+npx tsx src/index.ts --format text analysis.json
+```
+
+The expected JSON structure is:
 
 ```json
 {
