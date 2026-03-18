@@ -2,7 +2,7 @@
 
 Détecte des **communautés de classes** dans un graphe de dépendances PHP en appliquant l'algorithme de Louvain (Blondel et al., 2008).
 
-Prend en entrée le JSON produit par un analyseur de dépendances PHP et produit des groupes de classes fortement couplées — utile pour identifier des modules cohérents, des violations d'architecture ou des candidats à l'extraction en packages.
+Prend en entrée le JSON produit par [php-dep](https://github.com/DeGraciaMathieu/php-dep) et produit des groupes de classes fortement couplées — utile pour identifier des modules cohérents, des violations d'architecture ou des candidats à l'extraction en packages.
 
 ---
 
@@ -59,7 +59,7 @@ npx tsx src/index.ts --internal-only --format text analysis.json
 
 ## Format d'entrée
 
-JSON produit par un analyseur de dépendances PHP :
+JSON produit par [php-dep](https://github.com/DeGraciaMathieu/php-dep), un analyseur de dépendances PHP :
 
 ```json
 {
