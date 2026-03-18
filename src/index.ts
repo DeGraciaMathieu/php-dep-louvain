@@ -9,6 +9,7 @@
  *   --internal-only     Only cluster nodes listed in data.classes (skip external/vendor)
  *   --format json|text|html   Output format (default: json)
  *   --out <file>        Write output to a file instead of stdout
+ *   --max-levels <n>    Maximum number of Louvain phases (default: 15)
  *   --help              Show this help
  *
  * Input is read from the file argument or stdin if omitted.
@@ -29,14 +30,22 @@ function parseArgs(argv: string[]) {
   let outputFile  : string | null           = null
   let internalOnly                          = false
   let format      : 'json' | 'text' | 'html' = 'json'
+  let maxLevels                             = 15
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--help' || arg === '-h') {
       console.log(
-        'Usage: louvain [--internal-only] [--format json|text|html] [--out file] [input.json]',
+        'Usage: louvain [--internal-only] [--format json|text|html] [--out file] [--max-levels n] [input.json]',
       )
       process.exit(0)
+    } else if (arg === '--max-levels' && argv[i + 1]) {
+      const n = parseInt(argv[++i], 10)
+      if (isNaN(n) || n < 1) {
+        console.error('--max-levels must be a positive integer.')
+        process.exit(1)
+      }
+      maxLevels = n
     } else if (arg === '--internal-only') {
       internalOnly = true
     } else if (arg === '--format' && argv[i + 1]) {
@@ -52,7 +61,7 @@ function parseArgs(argv: string[]) {
       inputFile = arg
     }
   }
-  return { inputFile, outputFile, internalOnly, format }
+  return { inputFile, outputFile, internalOnly, format, maxLevels }
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +182,7 @@ function toTextOutput(
 // ---------------------------------------------------------------------------
 
 function main() {
-  const { inputFile, outputFile, internalOnly, format } = parseArgs(process.argv)
+  const { inputFile, outputFile, internalOnly, format, maxLevels } = parseArgs(process.argv)
 
   let raw: string
   try {
@@ -199,7 +208,7 @@ function main() {
   }
 
   const g         = buildGraph(data, internalOnly)
-  const community = louvain(g)
+  const community = louvain(g, maxLevels)
   const Q         = computeModularity(g, community)
 
   let output: string
