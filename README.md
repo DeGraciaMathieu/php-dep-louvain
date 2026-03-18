@@ -1,8 +1,8 @@
 # Louvain — PHP dependency community detection
 
-Détecte des **communautés de classes** dans un graphe de dépendances PHP en appliquant l'algorithme de Louvain (Blondel et al., 2008).
+Detects **class communities** in a PHP dependency graph by applying the Louvain algorithm (Blondel et al., 2008).
 
-Prend en entrée le JSON produit par [php-dep](https://github.com/DeGraciaMathieu/php-dep) et produit des groupes de classes fortement couplées — utile pour identifier des modules cohérents, des violations d'architecture ou des candidats à l'extraction en packages.
+Takes as input the JSON produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep) and outputs groups of tightly coupled classes — useful for identifying cohesive modules, architecture violations, or candidates for package extraction.
 
 ---
 
@@ -12,7 +12,7 @@ Prend en entrée le JSON produit par [php-dep](https://github.com/DeGraciaMathie
 npm install
 ```
 
-Requires Node ≥ 18.
+Requires Node ≥ 22.
 
 ---
 
@@ -22,7 +22,7 @@ Requires Node ≥ 18.
 npx tsx src/index.ts [options] [input.json]
 ```
 
-L'entrée peut être un fichier ou **stdin** :
+Input can be a file or **stdin**:
 
 ```bash
 cat analysis.json | npx tsx src/index.ts --format text
@@ -32,34 +32,34 @@ cat analysis.json | npx tsx src/index.ts --format text
 
 | Option | Description |
 |---|---|
-| `--format json` | Sortie JSON structurée **(défaut)** |
-| `--format text` | Sortie texte lisible dans le terminal |
-| `--format html` | Visualisation interactive (D3.js) |
-| `--out <file>` | Écrit le résultat dans un fichier |
-| `--internal-only` | N'inclut que les nœuds de `classes` (ignore vendor/built-in) |
+| `--format json` | Structured JSON output **(default)** |
+| `--format text` | Human-readable terminal output |
+| `--format html` | Interactive visualization (D3.js) |
+| `--out <file>` | Write result to a file |
+| `--internal-only` | Only include nodes from `classes` (ignores vendor/built-in) |
 
-### Exemples
+### Examples
 
 ```bash
-# Rapport JSON
+# JSON report
 npx tsx src/index.ts analysis.json
 
-# Rapport texte rapide
+# Quick text report
 npx tsx src/index.ts --format text analysis.json
 
-# Visualisation dans le navigateur
+# Browser visualization
 npx tsx src/index.ts --format html analysis.json --out graph.html
 open graph.html
 
-# Sans les dépendances externes (Psr\, Doctrine\, etc.)
+# Without external dependencies (Psr\, Doctrine\, etc.)
 npx tsx src/index.ts --internal-only --format text analysis.json
 ```
 
 ---
 
-## Format d'entrée
+## Input format
 
-JSON produit par [php-dep](https://github.com/DeGraciaMathieu/php-dep), un analyseur de dépendances PHP :
+JSON produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep), a PHP dependency analyser:
 
 ```json
 {
@@ -95,22 +95,22 @@ JSON produit par [php-dep](https://github.com/DeGraciaMathieu/php-dep), un analy
 }
 ```
 
-- **`classes`** — nœuds internes (votre code). Ils apparaissent distincts des nœuds externes dans tous les formats de sortie.
-- **`edges`** — arêtes dirigées (A dépend de B). L'algorithme les traite comme **non-dirigées**.
-- **`confidence`** — influence le poids de l'arête :
+- **`classes`** — internal nodes (your code). They appear distinct from external nodes in all output formats.
+- **`edges`** — directed edges (A depends on B). The algorithm treats them as **undirected**.
+- **`confidence`** — influences edge weight:
 
-| confidence | poids |
+| confidence | weight |
 |---|---|
 | `certain` | 1.00 |
 | `high` | 0.75 |
 | `medium` | 0.50 |
 | `low` | 0.25 |
 
-Plusieurs arêtes entre la même paire de nœuds sont **fusionnées** (somme des poids).
+Multiple edges between the same pair of nodes are **merged** (sum of weights).
 
 ---
 
-## Format de sortie JSON
+## JSON output format
 
 ```json
 {
@@ -141,97 +141,97 @@ Plusieurs arêtes entre la même paire de nœuds sont **fusionnées** (somme des
 }
 ```
 
-| Champ | Description |
+| Field | Description |
 |---|---|
-| `modularity` | Score Q de Newman-Girvan — plus c'est proche de 1, plus les communautés sont bien séparées. Au-dessus de 0.3 = structure significative. |
-| `namespace` | Plus long préfixe de namespace commun aux membres internes |
-| `density` | Arêtes internes réelles / arêtes internes possibles (0–1) |
-| `members` | Classes internes de la communauté |
-| `external_members` | Nœuds vendor/built-in présents dans la communauté |
+| `modularity` | Newman-Girvan Q score — closer to 1 means better-separated communities. Above 0.3 = significant structure. |
+| `namespace` | Longest common namespace prefix among internal members |
+| `density` | Actual internal edges / possible internal edges (0–1) |
+| `members` | Internal classes in the community |
+| `external_members` | Vendor/built-in nodes present in the community |
 
-Les communautés sont **triées par taille décroissante**.
+Communities are **sorted by descending size**.
 
 ---
 
-## Visualisation HTML
+## HTML visualization
 
 ```bash
 npx tsx src/index.ts --format html analysis.json --out graph.html
 open graph.html
 ```
 
-Le fichier HTML généré est **autonome** (données embarquées, D3.js via CDN).
+The generated HTML file is **self-contained** (embedded data, D3.js via CDN).
 
 ### Interface
 
-**Panneau gauche** — liste des communautés. Cliquer sur une carte déroule ses membres et met la communauté en surbrillance dans le graphe.
+**Left panel** — list of communities. Clicking a card expands its members and highlights the community in the graph.
 
-**Graphe principal** — simulation de forces D3.js avec :
-- Drag individuel des nœuds
-- Zoom et pan (molette / pinch)
-- Tooltip au survol (FQCN complet + type + communauté)
+**Main graph** — D3.js force simulation with:
+- Individual node dragging
+- Zoom and pan (scroll wheel / pinch)
+- Hover tooltip (full FQCN + type + community)
 
-**Encodage visuel**
+**Visual encoding**
 
-| Élément | Signification |
+| Element | Meaning |
 |---|---|
-| Couleur du nœud | Communauté d'appartenance |
-| Taille du nœud | Grand = interne, petit = externe/vendor |
-| Opacité du nœud | Plein = interne, transparent = externe |
-| Épaisseur de l'arête | Poids (confidence) |
-| Polygone coloré | Frontière convexe de la communauté |
+| Node color | Community membership |
+| Node size | Large = internal, small = external/vendor |
+| Node opacity | Solid = internal, transparent = external |
+| Edge thickness | Weight (confidence) |
+| Colored polygon | Convex hull of the community |
 
-**Boutons**
+**Buttons**
 
-| Bouton | Action |
+| Button | Action |
 |---|---|
-| `External nodes` | Masquer/afficher les nœuds vendor et built-in |
-| `Labels` | Masquer/afficher les noms courts |
-| `Hulls` | Masquer/afficher les polygones de communauté |
-| `⟳ Reset` | Recentrer le graphe et effacer les highlights |
+| `External nodes` | Toggle vendor and built-in nodes |
+| `Labels` | Toggle short name labels |
+| `Hulls` | Toggle community polygons |
+| `⟳ Reset` | Re-center the graph and clear highlights |
 
 ---
 
-## Algorithme
+## Algorithm
 
-Implémentation de l'algorithme de Louvain multi-niveaux (Blondel et al., 2008).
+Implementation of the multi-level Louvain algorithm (Blondel et al., 2008).
 
-**Phase 1 — Optimisation de la modularité**
+**Phase 1 — Modularity optimisation**
 
-Pour chaque nœud `i`, on calcule le gain ΔQ de le déplacer vers chaque communauté voisine :
+For each node `i`, compute the modularity gain ΔQ of moving it to each neighbouring community:
 
 ```
 ΔQ = k_{i,C} / m  −  sigmaTot[C] · k_i / (2m²)
 ```
 
-- `k_{i,C}` — somme des poids des arêtes de `i` vers la communauté `C`
-- `k_i` — degré pondéré de `i`
-- `sigmaTot[C]` — somme des degrés pondérés des nœuds de `C`
-- `m` — somme totale des poids d'arêtes (constante)
+- `k_{i,C}` — sum of edge weights from `i` to community `C`
+- `k_i` — weighted degree of `i`
+- `sigmaTot[C]` — sum of weighted degrees of nodes in `C`
+- `m` — total sum of edge weights (constant)
 
-On itère jusqu'à ce qu'aucun nœud ne bouge.
+Iterate until no node moves.
 
-**Phase 2 — Agrégation**
+**Phase 2 — Aggregation**
 
-Chaque communauté devient un super-nœud. Les arêtes intra-communauté se transforment en self-loops (encodés dans le degré pour préserver `Σk = 2m`). On recommence la Phase 1 sur ce super-graphe.
+Each community becomes a super-node. Intra-community edges become self-loops (encoded in the degree to preserve `Σk = 2m`). Phase 1 restarts on this super-graph.
 
-Les deux phases alternent jusqu'à convergence (max 15 niveaux).
+Both phases alternate until convergence (max 15 levels).
 
-**Propriétés**
+**Properties**
 
-- Complexité : O(n log n) en pratique
-- Déterministe pour un ordre de parcours fixe
-- `m` est préservé à travers tous les niveaux d'agrégation
+- Complexity: O(n log n) in practice
+- Deterministic for a fixed traversal order
+- `m` is preserved across all aggregation levels
 
 ---
 
-## Structure du projet
+## Project structure
 
 ```
 src/
-├── types.ts      — Interfaces TypeScript pour le format d'entrée
-├── graph.ts      — Construction du graphe depuis le JSON
-├── louvain.ts    — Algorithme (Phase 1 + Phase 2 + calcul de modularité)
-├── visualize.ts  — Générateur HTML/D3.js
-└── index.ts      — CLI et formatters de sortie
+├── types.ts      — TypeScript interfaces for the input format
+├── graph.ts      — Graph construction from JSON
+├── louvain.ts    — Algorithm (Phase 1 + Phase 2 + modularity calculation)
+├── visualize.ts  — HTML/D3.js generator
+└── index.ts      — CLI and output formatters
 ```
