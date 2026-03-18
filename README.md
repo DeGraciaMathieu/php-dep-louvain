@@ -37,6 +37,7 @@ cat analysis.json | npx tsx src/index.ts --format text
 | `--format html` | Interactive visualization (D3.js) |
 | `--out <file>` | Write result to a file |
 | `--internal-only` | Only include nodes from `classes` (ignores vendor/built-in) |
+| `--max-levels <n>` | Maximum number of Louvain phase cycles (default: 15) |
 
 ### Examples
 
@@ -215,7 +216,7 @@ Iterate until no node moves.
 
 Each community becomes a super-node. Intra-community edges become self-loops (encoded in the degree to preserve `Σk = 2m`). Phase 1 restarts on this super-graph.
 
-Both phases alternate until convergence (max 15 levels).
+Both phases alternate until convergence (configurable via `--max-levels`, default 15).
 
 **Properties**
 
