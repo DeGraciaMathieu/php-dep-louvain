@@ -151,11 +151,11 @@ svg{width:100%;height:100%}
 .tree-folder.open>.tree-dir .dir-arrow{transform:rotate(90deg)}
 .tree-leaf{display:flex;align-items:center;gap:6px;padding:3px 8px;
   color:#495057;border-radius:4px;margin:1px 4px;cursor:default;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.15s,background 0.15s}
 .tree-leaf:hover{background:#f8f9fa}
-.leaf-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.ext-badge{font-size:10px;color:#adb5bd;background:#f1f3f5;border-radius:3px;padding:0 3px;margin-left:2px}
-</style>
+.tree-leaf.dimmed{opacity:0.2}
+.tree-leaf.highlighted{font-weight:600}
+.leaf-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}</style>
 </head>
 <body>
 
@@ -234,6 +234,34 @@ function highlightCommunity(commId) {
     .attr('stroke', d => commId === null ? '#ced4da'
       : (d.source.community === commId || d.target.community === commId
           ? COLORS[commId % COLORS.length] : '#ced4da'));
+  document.querySelectorAll('.tree-leaf').forEach(el => {
+    const cid = parseInt(el.dataset.commId ?? '-1', 10);
+    if (commId === null) {
+      el.classList.remove('dimmed', 'highlighted');
+      el.style.background = '';
+    } else if (cid === commId) {
+      el.classList.add('highlighted');
+      el.classList.remove('dimmed');
+      el.style.background = 'color-mix(in srgb,' + COLORS[commId % COLORS.length] + ' 12%,white)';
+    } else {
+      el.classList.add('dimmed');
+      el.classList.remove('highlighted');
+      el.style.background = '';
+    }
+  });
+  if (commId !== null) {
+    document.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('open'));
+    document.querySelectorAll('.tree-leaf.highlighted').forEach(leaf => {
+      let el = leaf.parentElement;
+      while (el) {
+        if (el.classList.contains('tree-folder')) el.classList.add('open');
+        if (el.id === 'tree-content') break;
+        el = el.parentElement;
+      }
+    });
+  } else {
+    document.querySelectorAll('.tree-folder').forEach(f => f.classList.add('open'));
+  }
 }
 
 // ── Node radius helper ─────────────────────────────────────────────────────
@@ -356,14 +384,6 @@ function buildNamespaceTree() {
         else { if (!node[part] || node[part].__leaf) node[part] = {}; node = node[part]; }
       });
     });
-    c.external_members.forEach(fqn => {
-      const parts = fqn.split('\\\\');
-      let node = root;
-      parts.forEach((part, i) => {
-        if (i === parts.length - 1) { node[part] = { __leaf: true, color: '#adb5bd', commId: -1, fqn, ext: true }; }
-        else { if (!node[part] || node[part].__leaf) node[part] = {}; node = node[part]; }
-      });
-    });
   });
   return root;
 }
@@ -371,8 +391,7 @@ function buildNamespaceTree() {
 function renderTreeNode(name, node, depth) {
   if (node.__leaf) {
     const dot = '<span class="leaf-dot" style="background:' + node.color + '"></span>';
-    const ext = node.ext ? '<span class="ext-badge">ext</span>' : '';
-    return '<div class="tree-leaf" style="padding-left:' + (depth * 14 + 8) + 'px" title="' + node.fqn + '">' + dot + name + ext + '</div>';
+    return '<div class="tree-leaf" data-comm-id="' + node.commId + '" style="padding-left:' + (depth * 14 + 8) + 'px" title="' + node.fqn + '">' + dot + name + '</div>';
   }
   const entries = Object.entries(node).sort(([ak, av], [bk, bv]) => {
     const aLeaf = av.__leaf ? 1 : 0, bLeaf = bv.__leaf ? 1 : 0;
