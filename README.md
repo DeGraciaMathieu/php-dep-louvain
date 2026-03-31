@@ -1,5 +1,7 @@
 # Louvain — PHP dependency community detection
 
+https://github.com/user-attachments/assets/4e5132a0-beab-41a0-80c6-fd3374a9027a
+
 Detects **class communities** in a PHP dependency graph by applying the Louvain algorithm (Blondel et al., 2008).
 
 Takes as input the JSON produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep) and outputs groups of tightly coupled classes — useful for identifying cohesive modules, architecture violations, or candidates for package extraction.
