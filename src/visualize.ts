@@ -412,6 +412,21 @@ document.getElementById('tree-content').innerHTML =
     return aLeaf - bLeaf || ak.localeCompare(bk);
   }).map(([k, v]) => renderTreeNode(k, v, 0)).join('');
 
+document.getElementById('tree-content').addEventListener('click', e => {
+  const leaf = e.target.closest('.tree-leaf');
+  if (!leaf) return;
+  const commId = parseInt(leaf.dataset.commId, 10);
+  const card = document.querySelector('.comm-card[data-comm-id="' + commId + '"]');
+  if (!card) return;
+  const isActive = card.classList.contains('active');
+  document.querySelectorAll('.comm-card.active').forEach(el => el.classList.remove('active'));
+  if (!isActive) {
+    card.classList.add('active');
+    card.scrollIntoView({ block: 'nearest' });
+  }
+  highlightCommunity(isActive ? null : commId);
+});
+
 })();
 </script>
 </body>
