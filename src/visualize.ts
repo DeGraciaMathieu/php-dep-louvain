@@ -399,7 +399,7 @@ function renderTreeNode(name, node, depth) {
   });
   const inner = entries.map(([k, v]) => renderTreeNode(k, v, depth + 1)).join('');
   return '<div class="tree-folder open">' +
-    '<div class="tree-dir" style="padding-left:' + (depth * 14 + 8) + 'px" onclick="this.parentElement.classList.toggle(\'open\')">' +
+    '<div class="tree-dir" style="padding-left:' + (depth * 14 + 8) + 'px" onclick="this.parentElement.classList.toggle(\\'open\\')">' +
     '<span class="dir-arrow">▶</span>' + name + '</div>' +
     '<div class="tree-children">' + inner + '</div>' +
     '</div>';
