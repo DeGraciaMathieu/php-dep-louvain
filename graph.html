@@ -1,89 +1,8 @@
-import type { Graph } from './graph.js'
-
-export interface VisData {
-  meta: {
-    analyzed_path: string
-    modularity: number
-    community_count: number
-    node_count: number
-    internal_node_count: number
-  }
-  nodes: Array<{
-    id:        string
-    community: number
-    size:      number
-    namespace: string
-    density:   number
-    short:     string
-  }>
-  links: Array<{
-    source: string
-    target: string
-    weight: number
-  }>
-  communities: Array<{
-    id:               number
-    namespace:        string
-    size:             number
-    internal_count:   number
-    density:          number
-    members:          string[]
-    external_members: string[]
-  }>
-}
-
-export function buildVisData(
-  jsonOutput: ReturnType<typeof import('./index.js')['toJsonOutputRaw']>,
-  g: Graph,
-  community: Int32Array,
-): VisData {
-  // One node per community
-  const nodes: VisData['nodes'] = jsonOutput.communities.map(c => ({
-    id:        `community-${c.id}`,
-    community: c.id,
-    size:      c.internal_count,
-    namespace: c.namespace,
-    density:   c.density,
-    short:     'C' + c.id,
-  }))
-
-  // Aggregate class-level edges into community-level edges
-  const commWeights = new Map<string, number>()
-  for (let i = 0; i < g.n; i++) {
-    const ci = community[i]
-    for (const { to, weight } of g.adj[i]) {
-      if (to <= i) continue
-      const cj = community[to]
-      if (ci === cj) continue
-      const a   = Math.min(ci, cj)
-      const b   = Math.max(ci, cj)
-      const key = `${a}|${b}`
-      commWeights.set(key, (commWeights.get(key) ?? 0) + weight)
-    }
-  }
-
-  const links: VisData['links'] = Array.from(commWeights.entries()).map(([key, weight]) => {
-    const [a, b] = key.split('|')
-    return { source: `community-${a}`, target: `community-${b}`, weight }
-  })
-
-  return {
-    meta:        jsonOutput.meta,
-    nodes,
-    links,
-    communities: jsonOutput.communities,
-  }
-}
-
-/** Generate a fully self-contained HTML page with a D3 force-directed graph. */
-export function generateHtml(data: VisData): string {
-  const json = JSON.stringify(data)
-
-  return `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Louvain — ${data.meta.analyzed_path}</title>
+<title>Louvain — /demo/app</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden;background:#f8f9fa}
@@ -182,7 +101,7 @@ svg{width:100%;height:100%}
   <div id="tree-content"></div>
 </div>
 
-<script>const DATA = ${json};</script>
+<script>const DATA ={"meta":{"analyzed_path":"/demo/app","modularity":0.332819,"community_count":4,"node_count":12,"internal_node_count":10},"nodes":[{"id":"community-0","community":0,"size":4,"namespace":"App","density":0.5,"short":"C0"},{"id":"community-1","community":1,"size":2,"namespace":"App","density":0.6667,"short":"C1"},{"id":"community-2","community":2,"size":3,"namespace":"App","density":0.6667,"short":"C2"},{"id":"community-3","community":3,"size":1,"namespace":"App\\Repository","density":1,"short":"C3"}],"links":[{"source":"community-1","target":"community-3","weight":1},{"source":"community-0","target":"community-1","weight":0.75},{"source":"community-1","target":"community-2","weight":0.75},{"source":"community-2","target":"community-3","weight":1},{"source":"community-0","target":"community-3","weight":1},{"source":"community-0","target":"community-2","weight":1}],"communities":[{"id":0,"namespace":"App","size":4,"internal_count":4,"density":0.5,"members":["App\\Controller\\OrderController","App\\Entity\\Order","App\\Repository\\OrderRepository","App\\Service\\OrderService"],"external_members":[],"types":["class"]},{"id":1,"namespace":"App","size":3,"internal_count":2,"density":0.6667,"members":["App\\Controller\\UserController","App\\Service\\UserService"],"external_members":["Psr\\Log\\LoggerInterface"],"types":["class"]},{"id":2,"namespace":"App","size":3,"internal_count":3,"density":0.6667,"members":["App\\Entity\\User","App\\Event\\UserCreatedEvent","App\\Listener\\UserCreatedListener"],"external_members":[],"types":["class"]},{"id":3,"namespace":"App\\Repository","size":2,"internal_count":1,"density":1,"members":["App\\Repository\\UserRepository"],"external_members":["Doctrine\\ORM\\EntityManagerInterface"],"types":["class"]}]};</script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 (function() {
@@ -214,8 +133,8 @@ communities.forEach(c => {
       c.internal_count + ' class' + (c.internal_count !== 1 ? 'es' : '') +
       ' &nbsp;·&nbsp; density ' + c.density.toFixed(2) + '</div>' +
     '<div class="comm-members">' +
-      c.members.map(m => '<div class="cmember" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + '</div>').join('') +
-      c.external_members.map(m => '<div class="cmember ext" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + ' ⊕</div>').join('') +
+      c.members.map(m => '<div class="cmember" title="' + m + '">' + (m.split('\\').pop() ?? m) + '</div>').join('') +
+      c.external_members.map(m => '<div class="cmember ext" title="' + m + '">' + (m.split('\\').pop() ?? m) + ' ⊕</div>').join('') +
     '</div>';
   el.addEventListener('click', () => {
     el.classList.toggle('active');
@@ -349,7 +268,7 @@ function buildNamespaceTree() {
   communities.forEach(c => {
     const color = COLORS[c.id % COLORS.length];
     c.members.forEach(fqn => {
-      const parts = fqn.split('\\\\');
+      const parts = fqn.split('\\');
       let node = root;
       parts.forEach((part, i) => {
         if (i === parts.length - 1) { node[part] = { __leaf: true, color, commId: c.id, fqn }; }
@@ -357,7 +276,7 @@ function buildNamespaceTree() {
       });
     });
     c.external_members.forEach(fqn => {
-      const parts = fqn.split('\\\\');
+      const parts = fqn.split('\\');
       let node = root;
       parts.forEach((part, i) => {
         if (i === parts.length - 1) { node[part] = { __leaf: true, color: '#adb5bd', commId: -1, fqn, ext: true }; }
@@ -396,5 +315,4 @@ document.getElementById('tree-content').innerHTML =
 })();
 </script>
 </body>
-</html>`;
-}
+</html>
