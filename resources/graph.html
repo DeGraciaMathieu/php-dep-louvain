@@ -175,6 +175,11 @@ const COLORS = [
 const ISOLATED_COLOR = '#adb5bd';
 const ISOLATED = 'isolated';
 
+// Hover colors: what the hovered community uses, what uses it, and mutual pairs
+const OUT_COLOR   = '#e15759';
+const IN_COLOR    = '#4e79a7';
+const CYCLE_COLOR = '#9a4b00';
+
 const { meta, levels } = DATA;
 
 function color(commId) { return COLORS[commId % COLORS.length]; }
@@ -225,6 +230,7 @@ let L             = null; // context of the level on display
 let groupIsolated = false;
 let selected      = null; // community id, ISOLATED, or null
 let selectedPair  = null; // "a|b" community pair of the selected link, or null
+let hovered       = null; // node datum under the cursor, or null
 
 function commLabel(c) {
   return L.labelCount.get(baseLabel(c)) > 1 ? baseLabel(c) + ' #' + c.id : baseLabel(c);
@@ -320,13 +326,18 @@ const zoomBehavior = d3.zoom()
 svg.call(zoomBehavior);
 
 const defs = svg.append('defs');
-function addArrow(id, fill) {
+function addArrow(id, fill, orient) {
   defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
-    .attr('markerUnits', 'userSpaceOnUse').attr('markerWidth', 10).attr('markerHeight', 10).attr('orient', 'auto')
+    .attr('markerUnits', 'userSpaceOnUse').attr('markerWidth', 10).attr('markerHeight', 10)
+    .attr('orient', orient ?? 'auto')
     .append('path').attr('d', 'M0,0L10,5L0,10z').attr('fill', fill);
 }
 addArrow('arrow', '#adb5bd');
 addArrow('arrow-selected', '#212529');
+addArrow('arrow-out', OUT_COLOR);
+addArrow('arrow-in', IN_COLOR);
+addArrow('arrow-cycle', CYCLE_COLOR);
+addArrow('arrow-cycle-start', CYCLE_COLOR, 'auto-start-reverse');
 COLORS.forEach((c, i) => addArrow('arrow-' + i, c));
 
 const root   = svg.append('g');
@@ -353,13 +364,25 @@ function towards(n, x, y, r) {
   return [n.x + dx / len * r, n.y + dy / len * r];
 }
 
+function isCycleLink(l) { return L.directedKeys.has(l.target.id + '>' + l.source.id); }
+
+/** While its node is hovered, a cycle pair collapses into this one link, two-headed. */
+function mergedCycle(l) {
+  return hovered !== null && l.source.id === hovered.id && isCycleLink(l);
+}
+
 /**
  * A one-way dependency is drawn straight; only when the two directions of a
  * pair both exist does each bend slightly to the left, so they do not overlap.
  */
 function linkPath(d) {
   const s = d.source, t = d.target;
-  if (!L.directedKeys.has(t.id + '>' + s.id)) {
+  if (mergedCycle(d)) {
+    const [sx, sy] = towards(s, t.x, t.y, nodeRadius(s) + RING_GAP + 3);
+    const [tx, ty] = towards(t, s.x, s.y, nodeRadius(t) + RING_GAP + 3);
+    return 'M' + sx + ',' + sy + 'L' + tx + ',' + ty;
+  }
+  if (!isCycleLink(d)) {
     const [sx, sy] = towards(s, t.x, t.y, nodeRadius(s));
     const [tx, ty] = towards(t, s.x, s.y, nodeRadius(t) + RING_GAP + 3);
     return 'M' + sx + ',' + sy + 'L' + tx + ',' + ty;
@@ -488,8 +511,12 @@ function linkOpacity(d) {
 }
 
 function applyGraphStyles() {
+  hovered = null;
+
   linkEl.style('display',  d => d.weight >= minWeight ? null : 'none');
   linkHit.style('display', d => d.weight >= minWeight ? null : 'none');
+  linkEl.attr('marker-start', null).attr('d', linkPath);
+  linkHit.attr('d', linkPath);
 
   nodeEl.select('circle.disc')
     .attr('fill-opacity',   d => selected === null ? 0.85 : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 0.95 : 0.15))
@@ -516,8 +543,13 @@ function applyGraphStyles() {
     });
 }
 
-/** While a node is hovered, only its neighbourhood keeps its ink. */
+/**
+ * While a node is hovered, only its neighbourhood keeps its ink: what it uses
+ * in red, what uses it in blue, and each cycle pair as one two-headed link.
+ */
 function hoverFocus(d) {
+  hovered = d;
+
   const nbr = new Set([d.id]);
   L.links.forEach(l => {
     if (l.weight < minWeight) return;
@@ -525,7 +557,8 @@ function hoverFocus(d) {
     if (l.target.id === d.id) nbr.add(l.source.id);
   });
   const touches = l => l.source.id === d.id || l.target.id === d.id;
-  const hoverColor = d.isolatedGroup ? ISOLATED_COLOR : color(d.community);
+  // The reverse half of a touched cycle pair folds into the merged link
+  const foldedCycle = l => touches(l) && isCycleLink(l) && l.target.id === d.id;
 
   nodeEl.select('circle.disc')
     .attr('fill-opacity',   n => nbr.has(n.id) ? 0.95 : 0.12)
@@ -533,10 +566,19 @@ function hoverFocus(d) {
   nodeEl.selectAll('text').style('opacity', n => nbr.has(n.id) ? null : 0.25);
 
   linkEl
-    .attr('stroke', l => touches(l) ? hoverColor : '#ced4da')
+    .style('display', l => l.weight < minWeight || foldedCycle(l) ? 'none' : null)
+    .attr('stroke', l => !touches(l) ? '#ced4da'
+      : isCycleLink(l) ? CYCLE_COLOR
+      : l.source.id === d.id ? OUT_COLOR : IN_COLOR)
     .attr('stroke-opacity', l => touches(l) ? 0.95 : 0.04)
-    .attr('marker-end', l => touches(l) && !d.isolatedGroup
-      ? 'url(#arrow-' + (d.community % COLORS.length) + ')' : 'url(#arrow)');
+    .attr('marker-end', l => !touches(l) ? 'url(#arrow)'
+      : isCycleLink(l) ? 'url(#arrow-cycle)'
+      : l.source.id === d.id ? 'url(#arrow-out)' : 'url(#arrow-in)')
+    .attr('marker-start', l => mergedCycle(l) ? 'url(#arrow-cycle-start)' : null)
+    .attr('d', linkPath);
+  linkHit
+    .style('display', l => l.weight < minWeight || foldedCycle(l) ? 'none' : null)
+    .attr('d', linkPath);
 }
 
 function refresh() {
