@@ -10,21 +10,33 @@ The dependency graph is extracted by [php-dep](https://github.com/DeGraciaMathie
 
 ## Installation
 
+Download the PHAR of the latest release, it holds everything it needs, php-dep included:
+
+```bash
+wget https://github.com/DeGraciaMathieu/php-dep-louvain/releases/latest/download/php-dep-louvain.phar
+php php-dep-louvain.phar --help
+```
+
+Requires PHP ≥ 8.2.
+
+Or run it from the sources, where php-dep is installed by Composer straight from its GitHub repository:
+
 ```bash
 git clone https://github.com/DeGraciaMathieu/php-dep-louvain.git
 cd php-dep-louvain
 composer install
+bin/php-dep-louvain --help
 ```
-
-Requires PHP ≥ 8.2. php-dep is installed by Composer, straight from its GitHub repository.
 
 ---
 
 ## Usage
 
 ```bash
-bin/php-dep-louvain [options] [path]
+php php-dep-louvain.phar [options] [path]
 ```
+
+From the sources, run `bin/php-dep-louvain` instead.
 
 `path` is the PHP directory or file to analyze, `.` by default.
 
@@ -43,17 +55,17 @@ bin/php-dep-louvain [options] [path]
 
 ```bash
 # JSON report
-bin/php-dep-louvain src/
+php php-dep-louvain.phar src/
 
 # Quick text report
-bin/php-dep-louvain --format text src/
+php php-dep-louvain.phar --format text src/
 
 # Browser visualization
-bin/php-dep-louvain --format html src/ --out graph.html
+php php-dep-louvain.phar --format html src/ --out graph.html
 open graph.html
 
 # Without external dependencies (Psr\, Doctrine\, etc.)
-bin/php-dep-louvain --internal-only --format text src/
+php php-dep-louvain.phar --internal-only --format text src/
 ```
 
 ---
@@ -112,7 +124,7 @@ Communities are **sorted by descending size**.
 ## HTML visualization
 
 ```bash
-bin/php-dep-louvain --format html src/ --out graph.html
+php php-dep-louvain.phar --format html src/ --out graph.html
 open graph.html
 ```
 
@@ -186,4 +198,5 @@ src/
 ├── Report/ReportBuilder.php  — Community description (namespace, density, members)
 └── Output/                   — Text and HTML renderers
 resources/graph.html          — HTML/D3.js template
+box.json                      — PHAR build, attached to each release by .github/workflows/phar.yml
 ```

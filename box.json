@@ -1,0 +1,21 @@
+{
+    "output": "builds/php-dep-louvain.phar",
+    "compression": "GZ",
+    "directories": ["src", "resources"],
+    "finder": [
+        {
+            "in": "vendor",
+            "exclude": ["Tests", "tests", "Test", "test", "docs", "doc", "examples"]
+        }
+    ],
+    "files": [
+        "vendor/autoload.php",
+        "vendor/composer/autoload_classmap.php",
+        "vendor/composer/autoload_namespaces.php",
+        "vendor/composer/autoload_psr4.php",
+        "vendor/composer/autoload_real.php",
+        "vendor/composer/autoload_static.php",
+        "vendor/composer/ClassLoader.php",
+        "vendor/composer/installed.php"
+    ]
+}

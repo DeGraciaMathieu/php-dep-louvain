@@ -29,6 +29,7 @@
         "sort-packages": true
     },
     "require-dev": {
+        "humbug/box": "^4.6",
         "phpunit/phpunit": "^11.0"
     }
 }
