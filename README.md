@@ -83,6 +83,7 @@ bin/php-dep-louvain --internal-only --format text src/
       "size": 8,
       "internal_count": 6,
       "density": 0.6,
+      "cohesion": 0.75,
       "members": [
         "App\\Order\\OrderService",
         "App\\Order\\OrderRepository"
@@ -98,8 +99,9 @@ bin/php-dep-louvain --internal-only --format text src/
 | Field | Description |
 |---|---|
 | `modularity` | Newman-Girvan Q score — closer to 1 means better-separated communities. Above 0.3 = significant structure. |
-| `namespace` | Longest common namespace prefix among internal members |
+| `namespace` | Longest namespace shared by more than half of the internal members: a class from elsewhere does not hide it |
 | `density` | Actual internal edges / possible internal edges (0–1) |
+| `cohesion` | Share of the dependencies from or to the community that stay inside it (0–1) |
 | `members` | Internal classes in the community |
 | `external_members` | Vendor/built-in nodes present in the community |
 
@@ -118,31 +120,25 @@ The generated HTML file is **self-contained** (embedded data, D3.js via CDN).
 
 ### Interface
 
-**Left panel** — list of communities. Clicking a card expands its members and highlights the community in the graph.
+**Left panel** — list of communities, with their cohesion as a bar. Clicking a card expands its members and highlights the community in the graph. The search field keeps the communities holding a matching class and shows where it lives.
 
-**Main graph** — D3.js force simulation with:
-- Individual node dragging
-- Zoom and pan (scroll wheel / pinch)
-- Hover tooltip (full FQCN + type + community)
+**Main graph** — one node per community, in a D3.js force simulation:
+- Each node is named after its dominant namespace, numbered when two communities share it
+- A ring around each node shows its cohesion
+- An arrow goes from a community to the one it depends on, as thick as the number of class dependencies
+- Clicking an arrow lists the class dependencies it is made of, in both directions, and flags a cycle
+- Communities of one class without any dependency are grouped into a single `Isolated` node
+- Node dragging, zoom and pan, hover tooltip
 
-**Visual encoding**
-
-| Element | Meaning |
-|---|---|
-| Node color | Community membership |
-| Node size | Large = internal, small = external/vendor |
-| Node opacity | Solid = internal, transparent = external |
-| Edge thickness | Weight |
-| Colored polygon | Convex hull of the community |
+**Right panel** — the project tree, each class colored by its community. A class whose community differs from the one most classes of its folder belong to is flagged as misplaced, and `Misplaced classes only` keeps only those.
 
 **Buttons**
 
 | Button | Action |
 |---|---|
-| `External nodes` | Toggle vendor and built-in nodes |
-| `Labels` | Toggle short name labels |
-| `Hulls` | Toggle community polygons |
-| `⟳ Reset` | Re-center the graph and clear highlights |
+| `Group isolated` | Group or show one by one the communities of one class without any dependency |
+| `Labels` | Toggle node labels |
+| `⟳ Reset` | Re-center the graph and clear the selection |
 
 ---
 

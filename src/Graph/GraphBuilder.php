@@ -35,7 +35,8 @@ final class GraphBuilder
         $isInternal = array_map(fn(string $label) => $analysis->isDeclared($label), $labels);
 
         // Merge both directions of a pair: same undirected pair → summed weight
-        $edgeWeights = [];
+        $dependencies = [];
+        $edgeWeights  = [];
         foreach ($classes as $class) {
             $s = $index[$class];
             foreach ($analysis->dependenciesOf($class) as $dependency) {
@@ -43,6 +44,7 @@ final class GraphBuilder
                 if ($t === null || $s === $t) {
                     continue;
                 }
+                $dependencies[] = [$s, $t];
                 $key = min($s, $t) . ',' . max($s, $t);
                 $edgeWeights[$key] = ($edgeWeights[$key] ?? 0.0) + 1.0;
             }
@@ -61,6 +63,6 @@ final class GraphBuilder
             $m     += $w;
         }
 
-        return new Graph($n, $labels, $isInternal, $adj, $k, $m);
+        return new Graph($n, $labels, $isInternal, $adj, $k, $m, $dependencies);
     }
 }

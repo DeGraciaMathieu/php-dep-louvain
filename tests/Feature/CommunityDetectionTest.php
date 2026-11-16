@@ -39,6 +39,23 @@ final class CommunityDetectionTest extends FeatureTestCase
         $this->assertSame('Shop\Shipping', $this->communityOf('Shop\Shipping\Parcel', $report)['namespace']);
     }
 
+    public function test_it_names_a_community_after_its_namespace_despite_a_class_from_elsewhere(): void
+    {
+        $report = $this->report([self::MISPLACED]);
+
+        $catalog = $this->communityOf('Shop\Billing\TaxRate', $report);
+
+        $this->assertSame('Shop\Catalog', $catalog['namespace']);
+    }
+
+    public function test_it_measures_the_share_of_dependencies_that_stay_inside_a_community(): void
+    {
+        $report = $this->report([self::SHOP]);
+
+        // Billing: 6 dependencies inside, ShippingService → Invoice comes from outside
+        $this->assertEqualsWithDelta(6 / 7, $this->communityOf('Shop\Billing\Invoice', $report)['cohesion'], 0.0001);
+    }
+
     public function test_it_puts_an_external_class_in_the_community_that_uses_it(): void
     {
         $report = $this->report([self::SHOP]);

@@ -7,7 +7,7 @@ namespace PhpDepLouvain\Report;
 use PhpDepLouvain\Graph\Graph;
 
 /**
- * Describe each community of a partition: members, common namespace, density.
+ * Describe each community of a partition: members, dominant namespace, density, cohesion.
  */
 final class ReportBuilder
 {
@@ -33,10 +33,11 @@ final class ReportBuilder
 
             $communities[] = [
                 'id'               => $id,
-                'namespace'        => self::commonNamespace($internalMembers),
+                'namespace'        => self::dominantNamespace($internalMembers),
                 'size'             => count($members),
                 'internal_count'   => count($internalMembers),
                 'density'          => round(self::density($members, $g), 4),
+                'cohesion'         => round(self::cohesion($id, $g, $community), 4),
                 'members'          => $internalMembers,
                 'external_members' => $externalMembers,
             ];
@@ -69,27 +70,42 @@ final class ReportBuilder
         return $members;
     }
 
-    /** @param string[] $fqcns */
-    public static function commonNamespace(array $fqcns): string
+    /**
+     * The longest namespace shared by more than half of the classes: one class
+     * from elsewhere does not hide the namespace the others live in.
+     *
+     * @param string[] $fqcns
+     */
+    public static function dominantNamespace(array $fqcns): string
     {
         if ($fqcns === []) {
             return '';
         }
 
-        $parts    = array_map(fn(string $f) => explode('\\', $f), $fqcns);
-        $shortest = min(array_map('count', $parts));
-        $common   = [];
-        for ($i = 0; $i < $shortest - 1; $i++) {
-            $seg = $parts[0][$i];
-            foreach ($parts as $p) {
-                if ($p[$i] !== $seg) {
-                    break 2;
+        $namespaces = array_map(fn(string $f) => array_slice(explode('\\', $f), 0, -1), $fqcns);
+        $dominant   = [];
+
+        for ($depth = 1; ; $depth++) {
+            $counts = [];
+            foreach ($namespaces as $segments) {
+                if (count($segments) >= $depth && array_slice($segments, 0, $depth - 1) === $dominant) {
+                    $prefix = implode('\\', array_slice($segments, 0, $depth));
+                    $counts[$prefix] = ($counts[$prefix] ?? 0) + 1;
                 }
             }
-            $common[] = $seg;
+            if ($counts === []) {
+                break;
+            }
+
+            arsort($counts);
+            $prefix = (string) array_key_first($counts);
+            if ($counts[$prefix] * 2 <= count($fqcns)) {
+                break;
+            }
+            $dominant = explode('\\', $prefix);
         }
 
-        return $common === [] ? '(root)' : implode('\\', $common);
+        return $dominant === [] ? '(root)' : implode('\\', $dominant);
     }
 
     /** @param int[] $members */
@@ -111,5 +127,27 @@ final class ReportBuilder
         }
 
         return $edges / (($n * ($n - 1)) / 2);
+    }
+
+    /**
+     * Share of the dependencies from or to the community that stay inside it.
+     *
+     * @param int[] $community
+     */
+    private static function cohesion(int $id, Graph $g, array $community): float
+    {
+        $inside = 0;
+        $total  = 0;
+        foreach ($g->dependencies as [$from, $to]) {
+            if ($community[$from] !== $id && $community[$to] !== $id) {
+                continue;
+            }
+            $total++;
+            if ($community[$from] === $community[$to]) {
+                $inside++;
+            }
+        }
+
+        return $total === 0 ? 0.0 : $inside / $total;
     }
 }

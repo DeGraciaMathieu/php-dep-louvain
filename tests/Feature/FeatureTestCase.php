@@ -11,8 +11,9 @@ use PHPUnit\Framework\TestCase;
  */
 abstract class FeatureTestCase extends TestCase
 {
-    protected const SHOP  = __DIR__ . '/../Fixtures/shop';
-    protected const EMPTY = __DIR__ . '/../Fixtures/empty';
+    protected const SHOP      = __DIR__ . '/../Fixtures/shop';
+    protected const MISPLACED = __DIR__ . '/../Fixtures/misplaced';
+    protected const EMPTY     = __DIR__ . '/../Fixtures/empty';
 
     private const BIN = __DIR__ . '/../../bin/php-dep-louvain';
 

@@ -43,41 +43,32 @@ final class HtmlRenderer
             'community' => $c['id'],
             'size'      => $c['internal_count'],
             'namespace' => $c['namespace'],
-            'density'   => $c['density'],
-            'short'     => 'C' . $c['id'],
+            'cohesion'  => $c['cohesion'],
         ], $communities);
     }
 
     /**
-     * Aggregate class-level edges into community-level edges.
+     * Aggregate class-level dependencies into directed community-level links,
+     * each keeping the class dependencies it is made of.
      *
      * @param int[] $community
-     * @return list<array{source: string, target: string, weight: float}>
+     * @return list<array{source: string, target: string, weight: int, dependencies: list<array{string, string}>}>
      */
     private static function links(Graph $g, array $community): array
     {
-        $commWeights = [];
-        for ($i = 0; $i < $g->n; $i++) {
-            $ci = $community[$i];
-            foreach ($g->adj[$i] as [$to, $weight]) {
-                if ($to <= $i) {
-                    continue;
-                }
-                $cj = $community[$to];
-                if ($ci === $cj) {
-                    continue;
-                }
-                $key = min($ci, $cj) . '|' . max($ci, $cj);
-                $commWeights[$key] = ($commWeights[$key] ?? 0.0) + $weight;
-            }
-        }
-
         $links = [];
-        foreach ($commWeights as $key => $weight) {
-            [$a, $b] = explode('|', (string) $key);
-            $links[] = ['source' => 'community-' . $a, 'target' => 'community-' . $b, 'weight' => $weight];
+        foreach ($g->dependencies as [$from, $to]) {
+            $a = $community[$from];
+            $b = $community[$to];
+            if ($a === $b) {
+                continue;
+            }
+            $key = $a . '>' . $b;
+            $links[$key] ??= ['source' => 'community-' . $a, 'target' => 'community-' . $b, 'weight' => 0, 'dependencies' => []];
+            $links[$key]['weight']++;
+            $links[$key]['dependencies'][] = [$g->labels[$from], $g->labels[$to]];
         }
 
-        return $links;
+        return array_values($links);
     }
 }
