@@ -1,89 +1,8 @@
-import type { Graph } from './graph.js'
-
-export interface VisData {
-  meta: {
-    analyzed_path: string
-    modularity: number
-    community_count: number
-    node_count: number
-    internal_node_count: number
-  }
-  nodes: Array<{
-    id:        string
-    community: number
-    size:      number
-    namespace: string
-    density:   number
-    short:     string
-  }>
-  links: Array<{
-    source: string
-    target: string
-    weight: number
-  }>
-  communities: Array<{
-    id:               number
-    namespace:        string
-    size:             number
-    internal_count:   number
-    density:          number
-    members:          string[]
-    external_members: string[]
-  }>
-}
-
-export function buildVisData(
-  jsonOutput: ReturnType<typeof import('./index.js')['toJsonOutputRaw']>,
-  g: Graph,
-  community: Int32Array,
-): VisData {
-  // One node per community
-  const nodes: VisData['nodes'] = jsonOutput.communities.map(c => ({
-    id:        `community-${c.id}`,
-    community: c.id,
-    size:      c.internal_count,
-    namespace: c.namespace,
-    density:   c.density,
-    short:     'C' + c.id,
-  }))
-
-  // Aggregate class-level edges into community-level edges
-  const commWeights = new Map<string, number>()
-  for (let i = 0; i < g.n; i++) {
-    const ci = community[i]
-    for (const { to, weight } of g.adj[i]) {
-      if (to <= i) continue
-      const cj = community[to]
-      if (ci === cj) continue
-      const a   = Math.min(ci, cj)
-      const b   = Math.max(ci, cj)
-      const key = `${a}|${b}`
-      commWeights.set(key, (commWeights.get(key) ?? 0) + weight)
-    }
-  }
-
-  const links: VisData['links'] = Array.from(commWeights.entries()).map(([key, weight]) => {
-    const [a, b] = key.split('|')
-    return { source: `community-${a}`, target: `community-${b}`, weight }
-  })
-
-  return {
-    meta:        jsonOutput.meta,
-    nodes,
-    links,
-    communities: jsonOutput.communities,
-  }
-}
-
-/** Generate a fully self-contained HTML page with a D3 force-directed graph. */
-export function generateHtml(data: VisData): string {
-  const json = JSON.stringify(data)
-
-  return `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Louvain — ${data.meta.analyzed_path}</title>
+<title>Louvain — {{TITLE}}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden;background:#f8f9fa}
@@ -182,7 +101,7 @@ svg{width:100%;height:100%}
   <div id="tree-content"></div>
 </div>
 
-<script>const DATA = ${json};</script>
+<script>const DATA = {{DATA}};</script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 (function() {
@@ -214,8 +133,8 @@ communities.forEach(c => {
       c.internal_count + ' class' + (c.internal_count !== 1 ? 'es' : '') +
       ' &nbsp;·&nbsp; density ' + c.density.toFixed(2) + '</div>' +
     '<div class="comm-members">' +
-      c.members.map(m => '<div class="cmember" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + '</div>').join('') +
-      c.external_members.map(m => '<div class="cmember ext" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + ' ⊕</div>').join('') +
+      c.members.map(m => '<div class="cmember" title="' + m + '">' + (m.split('\\').pop() ?? m) + '</div>').join('') +
+      c.external_members.map(m => '<div class="cmember ext" title="' + m + '">' + (m.split('\\').pop() ?? m) + ' ⊕</div>').join('') +
     '</div>';
   el.addEventListener('click', () => {
     el.classList.toggle('active');
@@ -377,7 +296,7 @@ function buildNamespaceTree() {
   communities.forEach(c => {
     const color = COLORS[c.id % COLORS.length];
     c.members.forEach(fqn => {
-      const parts = fqn.split('\\\\');
+      const parts = fqn.split('\\');
       let node = root;
       parts.forEach((part, i) => {
         if (i === parts.length - 1) { node[part] = { __leaf: true, color, commId: c.id, fqn }; }
@@ -399,7 +318,7 @@ function renderTreeNode(name, node, depth) {
   });
   const inner = entries.map(([k, v]) => renderTreeNode(k, v, depth + 1)).join('');
   return '<div class="tree-folder open">' +
-    '<div class="tree-dir" style="padding-left:' + (depth * 14 + 8) + 'px" onclick="this.parentElement.classList.toggle(\\'open\\')">' +
+    '<div class="tree-dir" style="padding-left:' + (depth * 14 + 8) + 'px" onclick="this.parentElement.classList.toggle(\'open\')">' +
     '<span class="dir-arrow">▶</span>' + name + '</div>' +
     '<div class="tree-children">' + inner + '</div>' +
     '</div>';
@@ -430,5 +349,4 @@ document.getElementById('tree-content').addEventListener('click', e => {
 })();
 </script>
 </body>
-</html>`;
-}
+</html>

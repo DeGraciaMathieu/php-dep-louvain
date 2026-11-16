@@ -1,34 +1,32 @@
-# Louvain — PHP dependency community detection
+# php-dep-louvain — PHP dependency community detection
 
 https://github.com/user-attachments/assets/4e5132a0-beab-41a0-80c6-fd3374a9027a
 
-Detects **class communities** in a PHP dependency graph by applying the Louvain algorithm (Blondel et al., 2008).
+Detects **class communities** in a PHP project by applying the Louvain algorithm (Blondel et al., 2008) to its dependency graph.
 
-Takes as input the JSON produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep) and outputs groups of tightly coupled classes — useful for identifying cohesive modules, architecture violations, or candidates for package extraction.
+The dependency graph is extracted by [php-dep](https://github.com/DeGraciaMathieu/php-dep), used as a library: point the tool at a PHP directory and it outputs groups of tightly coupled classes — useful for identifying cohesive modules, architecture violations, or candidates for package extraction.
 
 ---
 
 ## Installation
 
 ```bash
-npm install
+git clone https://github.com/DeGraciaMathieu/php-dep-louvain.git
+cd php-dep-louvain
+composer install
 ```
 
-Requires Node ≥ 22.
+Requires PHP ≥ 8.2. php-dep is installed by Composer, straight from its GitHub repository.
 
 ---
 
 ## Usage
 
 ```bash
-npx tsx src/index.ts [options] [input.json]
+bin/php-dep-louvain [options] [path]
 ```
 
-Input can be a file or **stdin**:
-
-```bash
-cat analysis.json | npx tsx src/index.ts --format text
-```
+`path` is the PHP directory or file to analyze, `.` by default.
 
 ### Options
 
@@ -38,88 +36,32 @@ cat analysis.json | npx tsx src/index.ts --format text
 | `--format text` | Human-readable terminal output |
 | `--format html` | Interactive visualization (D3.js) |
 | `--out <file>` | Write result to a file |
-| `--internal-only` | Only include nodes from `classes` (ignores vendor/built-in) |
+| `--internal-only` | Only include classes declared in the project (ignores vendor/built-in) |
 | `--max-levels <n>` | Maximum number of Louvain phase cycles (default: 15) |
 
 ### Examples
 
 ```bash
 # JSON report
-npx tsx src/index.ts analysis.json
+bin/php-dep-louvain src/
 
 # Quick text report
-npx tsx src/index.ts --format text analysis.json
+bin/php-dep-louvain --format text src/
 
 # Browser visualization
-npx tsx src/index.ts --format html analysis.json --out graph.html
+bin/php-dep-louvain --format html src/ --out graph.html
 open graph.html
 
 # Without external dependencies (Psr\, Doctrine\, etc.)
-npx tsx src/index.ts --internal-only --format text analysis.json
+bin/php-dep-louvain --internal-only --format text src/
 ```
 
 ---
 
-## Input format
+## Graph construction
 
-This tool expects a JSON dependency graph produced by [php-dep](https://github.com/DeGraciaMathieu/php-dep). Run `php-dep` on your PHP project first to generate the JSON file, then pass it to `php-dep-louvain`:
-
-```bash
-# Step 1 — generate the dependency graph with php-dep
-php-dep analyse src/ --out analysis.json
-
-# Step 2 — detect communities with php-dep-louvain
-npx tsx src/index.ts --format text analysis.json
-```
-
-The expected JSON structure is:
-
-```json
-{
-  "meta": {
-    "version": "1.0",
-    "analyzed_path": "/path/to/project",
-    "file_count": 42,
-    "class_count": 38,
-    "node_count": 95,
-    "edge_count": 312
-  },
-  "classes": [
-    {
-      "fqcn": "App\\Service\\UserService",
-      "type": "class",
-      "file": "/path/to/UserService.php",
-      "line": 12,
-      "dependencies": ["App\\Repository\\UserRepository"],
-      "dependants":   ["App\\Controller\\UserController"]
-    }
-  ],
-  "edges": [
-    {
-      "source":     "App\\Service\\UserService",
-      "target":     "App\\Repository\\UserRepository",
-      "type":       "param_type",
-      "confidence": "certain",
-      "file":       "/path/to/UserService.php",
-      "line":       23,
-      "metadata":   {}
-    }
-  ]
-}
-```
-
-- **`classes`** — internal nodes (your code). They appear distinct from external nodes in all output formats.
-- **`edges`** — directed edges (A depends on B). The algorithm treats them as **undirected**.
-- **`confidence`** — influences edge weight:
-
-| confidence | weight |
-|---|---|
-| `certain` | 1.00 |
-| `high` | 0.75 |
-| `medium` | 0.50 |
-| `low` | 0.25 |
-
-Multiple edges between the same pair of nodes are **merged** (sum of weights).
+- **Nodes** — the classes declared in the project, plus the external classes they use (vendor, built-in), unless `--internal-only`.
+- **Edges** — each dependency found by php-dep (A uses B) is an edge of weight 1. The algorithm treats them as **undirected**: when A uses B and B uses A, the pair weighs 2.
 
 ---
 
@@ -147,8 +89,7 @@ Multiple edges between the same pair of nodes are **merged** (sum of weights).
       ],
       "external_members": [
         "Doctrine\\ORM\\EntityManagerInterface"
-      ],
-      "types": ["class"]
+      ]
     }
   ]
 }
@@ -169,7 +110,7 @@ Communities are **sorted by descending size**.
 ## HTML visualization
 
 ```bash
-npx tsx src/index.ts --format html analysis.json --out graph.html
+bin/php-dep-louvain --format html src/ --out graph.html
 open graph.html
 ```
 
@@ -191,7 +132,7 @@ The generated HTML file is **self-contained** (embedded data, D3.js via CDN).
 | Node color | Community membership |
 | Node size | Large = internal, small = external/vendor |
 | Node opacity | Solid = internal, transparent = external |
-| Edge thickness | Weight (confidence) |
+| Edge thickness | Weight |
 | Colored polygon | Convex hull of the community |
 
 **Buttons**
@@ -241,10 +182,12 @@ Both phases alternate until convergence (configurable via `--max-levels`, defaul
 ## Project structure
 
 ```
+bin/php-dep-louvain           — CLI entry-point
 src/
-├── types.ts      — TypeScript interfaces for the input format
-├── graph.ts      — Graph construction from JSON
-├── louvain.ts    — Algorithm (Phase 1 + Phase 2 + modularity calculation)
-├── visualize.ts  — HTML/D3.js generator
-└── index.ts      — CLI and output formatters
+├── Console/Application.php   — Argument parsing, runs php-dep then Louvain
+├── Graph/                    — Weighted graph built from the php-dep analysis
+├── Louvain/Louvain.php       — Algorithm (Phase 1 + Phase 2 + modularity calculation)
+├── Report/ReportBuilder.php  — Community description (namespace, density, members)
+└── Output/                   — Text and HTML renderers
+resources/graph.html          — HTML/D3.js template
 ```
