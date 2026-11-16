@@ -22,7 +22,7 @@ final class TextRenderer
 
         foreach ($membersByCommunity as $id => $members) {
             $internal = array_filter($members, fn(int $i) => $g->isInternal[$i]);
-            $ns       = ReportBuilder::commonNamespace(array_map(fn(int $i) => $g->labels[$i], $internal));
+            $ns       = ReportBuilder::dominantNamespace(array_map(fn(int $i) => $g->labels[$i], $internal));
             $lines[]  = sprintf('── Community %d  (%d nodes, namespace: %s)', $id, count($members), $ns);
             foreach ($members as $i) {
                 $lines[] = '   ' . $g->labels[$i] . ($g->isInternal[$i] ? '' : '  [ext]');
