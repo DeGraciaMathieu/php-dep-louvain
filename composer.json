@@ -1,0 +1,35 @@
+{
+    "name": "degraciamathieu/php-dep-louvain",
+    "description": "Detects class communities in a PHP dependency graph built by php-dep, with the Louvain algorithm",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/DeGraciaMathieu/php-dep"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "degraciamathieu/php-dep": "^3.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "PhpDepLouvain\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PhpDepLouvain\\Tests\\": "tests/"
+        }
+    },
+    "bin": ["bin/php-dep-louvain"],
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "require-dev": {
+        "humbug/box": "^4.6",
+        "phpunit/phpunit": "^11.0"
+    }
+}

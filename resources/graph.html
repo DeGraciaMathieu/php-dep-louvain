@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Louvain — {{TITLE}}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden;background:#f8f9fa}
+
+/* ── Sidebar ── */
+#sidebar{width:280px;min-width:220px;background:#fff;border-right:1px solid #dee2e6;
+  display:flex;flex-direction:column;overflow:hidden}
+#sidebar-header{padding:16px;border-bottom:1px solid #dee2e6}
+#sidebar-header h1{font-size:14px;font-weight:700;color:#212529;margin-bottom:4px}
+.meta-line{font-size:12px;color:#868e96;margin-top:2px}
+.badge{display:inline-block;background:#e9ecef;border-radius:100px;
+  padding:1px 7px;font-size:11px;font-weight:600;margin-right:4px}
+#search{width:100%;margin-top:12px;padding:6px 10px;font-size:12px;
+  border:1px solid #dee2e6;border-radius:6px;color:#212529}
+#search:focus{outline:2px solid #4e79a7;outline-offset:-1px}
+#community-list{flex:1;overflow-y:auto;padding:12px}
+.comm-card{border-radius:8px;padding:10px 12px;margin-bottom:8px;
+  border-left:4px solid var(--c);cursor:pointer;transition:background 0.15s;
+  background:color-mix(in srgb,var(--c) 6%,white)}
+.comm-card:hover{background:color-mix(in srgb,var(--c) 14%,white)}
+.comm-card.active{background:color-mix(in srgb,var(--c) 18%,white)}
+.comm-card .ctitle{font-size:13px;font-weight:600;color:#212529}
+.comm-card .csub{font-size:11px;color:#6c757d;margin-top:2px}
+.cbar{height:4px;margin-top:6px;border-radius:2px;background:color-mix(in srgb,var(--c) 15%,white);overflow:hidden}
+.cbar span{display:block;height:100%;background:var(--c)}
+.comm-members{display:none;margin-top:8px;padding-top:6px;border-top:1px solid color-mix(in srgb,var(--c) 20%,#eee)}
+.comm-card.active .comm-members{display:block}
+.cmember{font-size:11px;color:#495057;padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmember.ext{color:#adb5bd}
+.chits{margin-top:6px}
+.chits mark{background:none;color:#212529;font-weight:700}
+.no-match{font-size:12px;color:#868e96;padding:4px}
+
+/* ── Main ── */
+#main{flex:1;position:relative;overflow:hidden}
+svg{width:100%;height:100%}
+.link{fill:none}
+.link-hit{fill:none;stroke:transparent;stroke-width:14;cursor:pointer}
+.node circle{stroke-width:2;cursor:grab}
+.node .disc{filter:drop-shadow(0 2px 4px rgba(0,0,0,.2))}
+.node circle:active{cursor:grabbing}
+.node text{pointer-events:none;font-size:11px;fill:#212529;font-weight:600}
+.node .sub{font-size:9px;fill:#495057;font-weight:400}
+
+/* ── Tooltip ── */
+#tooltip{position:absolute;background:rgba(33,37,41,.88);color:#f8f9fa;
+  padding:8px 12px;border-radius:6px;font-size:12px;line-height:1.5;
+  pointer-events:none;display:none;max-width:320px;white-space:nowrap}
+#tooltip strong{font-weight:600}
+
+/* ── Link panel ── */
+#link-panel{position:absolute;left:16px;bottom:16px;width:340px;max-height:50%;overflow-y:auto;
+  background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:12px 14px;
+  box-shadow:0 2px 8px rgba(0,0,0,.08);font-size:12px;color:#212529}
+#link-panel[hidden]{display:none}
+#link-panel h2{font-size:13px;font-weight:700;padding-right:20px}
+#link-close{position:absolute;top:8px;right:10px;border:none;background:none;font-size:16px;
+  line-height:1;color:#868e96;cursor:pointer}
+.ldir{margin-top:10px}
+.ldir-title{font-weight:600;margin-bottom:2px}
+.ldep{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#495057;padding:1px 0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lcycle{margin-top:10px;padding:6px 8px;border-radius:6px;background:#fff3e0;color:#9a4b00}
+
+/* ── Controls ── */
+#controls{position:absolute;bottom:16px;right:16px;display:flex;gap:6px}
+#controls button{background:#fff;border:1px solid #dee2e6;border-radius:6px;
+  padding:6px 12px;font-size:12px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+#controls button:hover{background:#f1f3f5}
+#controls button.active{background:#e9ecef;font-weight:600}
+#controls button[hidden]{display:none}
+
+/* ── Stats bar ── */
+#statsbar{position:absolute;top:12px;right:12px;background:rgba(255,255,255,.9);
+  border:1px solid #dee2e6;border-radius:6px;padding:6px 12px;
+  font-size:11px;color:#6c757d;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+
+/* ── Tree panel ── */
+#treepanel{width:260px;min-width:200px;background:#fff;border-left:1px solid #dee2e6;
+  display:flex;flex-direction:column;overflow:hidden}
+#treepanel-header{padding:16px;border-bottom:1px solid #dee2e6;
+  font-size:14px;font-weight:700;color:#212529;flex-shrink:0}
+#treepanel-header label{display:flex;align-items:center;gap:6px;margin-top:8px;
+  font-size:12px;font-weight:400;color:#495057;cursor:pointer}
+#tree-content{flex:1;overflow-y:auto;padding:8px 0;font-size:12px}
+.tree-dir{display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;
+  color:#495057;border-radius:4px;margin:1px 4px;user-select:none}
+.tree-dir:hover{background:#f1f3f5}
+.dir-arrow{font-size:9px;color:#adb5bd;transition:transform 0.15s;flex-shrink:0}
+.dir-hint{font-size:10px;color:#adb5bd;margin-left:auto;white-space:nowrap}
+.tree-folder>.tree-children{display:none}
+.tree-folder.open>.tree-children{display:block}
+.tree-folder.open>.tree-dir .dir-arrow{transform:rotate(90deg)}
+.tree-leaf{display:flex;align-items:center;gap:6px;padding:3px 8px;
+  color:#495057;border-radius:4px;margin:1px 4px;cursor:default;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.15s,background 0.15s}
+.tree-leaf:hover{background:#f8f9fa}
+.tree-leaf.dimmed{opacity:0.2}
+.tree-leaf.highlighted{font-weight:600}
+.tree-leaf.misplaced{background:#fff3e0}
+.misplaced-tag{font-size:10px;color:#9a4b00;border:1px solid currentColor;border-radius:100px;
+  padding:0 6px;margin-left:auto;flex-shrink:0}
+.only-misplaced .tree-leaf:not(.misplaced),
+.only-misplaced .tree-folder:not(.has-misplaced){display:none}
+.leaf-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>Louvain Communities</h1>
+    <div id="meta-info"></div>
+    <input id="search" type="search" placeholder="Find a class…" autocomplete="off">
+  </div>
+  <div id="community-list"></div>
+</div>
+
+<div id="main">
+  <svg id="graph"></svg>
+  <div id="tooltip"></div>
+  <div id="statsbar"></div>
+  <div id="link-panel" hidden>
+    <button id="link-close" title="Close">×</button>
+    <div id="link-content"></div>
+  </div>
+  <div id="controls">
+    <button id="btn-isolated" class="active">Group isolated</button>
+    <button id="btn-labels" class="active">Labels</button>
+    <button id="btn-reset">⟳ Reset</button>
+  </div>
+</div>
+
+<div id="treepanel">
+  <div id="treepanel-header">
+    Project Tree
+    <label><input type="checkbox" id="only-misplaced"> Misplaced classes only</label>
+  </div>
+  <div id="tree-content"></div>
+</div>
+
+<script>const DATA = {{DATA}};</script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function() {
+const COLORS = [
+  '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
+  '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac',
+  '#d37295','#a0cbe8','#499894','#86bcb6','#e6925a',
+];
+const ISOLATED_COLOR = '#adb5bd';
+const ISOLATED = 'isolated';
+
+const { nodes, links, communities, meta } = DATA;
+
+function color(commId) { return COLORS[commId % COLORS.length]; }
+function shortName(fqcn) { return fqcn.split('\\').pop(); }
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+function percent(x) { return Math.round(x * 100) + ' %'; }
+
+/** A community is named after the last segment of its dominant namespace, numbered when two share it. */
+function baseLabel(c) {
+  return c.namespace && c.namespace !== '(root)' ? shortName(c.namespace) : 'Community';
+}
+const labelCount = new Map();
+communities.forEach(c => labelCount.set(baseLabel(c), (labelCount.get(baseLabel(c)) || 0) + 1));
+function commLabel(c) {
+  return labelCount.get(baseLabel(c)) > 1 ? baseLabel(c) + ' #' + c.id : baseLabel(c);
+}
+
+const commById = new Map(communities.map(c => [c.id, c]));
+
+// A community of one class that no link touches: grouped into one node to keep the map readable
+const linkedComms = new Set();
+links.forEach(l => {
+  linkedComms.add(+l.source.split('-').pop());
+  linkedComms.add(+l.target.split('-').pop());
+});
+const isolatedIds = new Set(communities.filter(c => c.size === 1 && !linkedComms.has(c.id)).map(c => c.id));
+const isolatedMembers = communities.filter(c => isolatedIds.has(c.id)).flatMap(c => [...c.members, ...c.external_members]);
+const groupNode = { id: ISOLATED, isolatedGroup: true, size: isolatedIds.size };
+
+let groupIsolated = isolatedIds.size > 1;
+let selected      = null; // community id, ISOLATED, or null
+let selectedPair  = null; // "a|b" community pair of the selected link, or null
+
+/** The id under which a community is shown: isolated ones fold into the group when grouped. */
+function shownAs(commId) {
+  return groupIsolated && isolatedIds.has(commId) ? ISOLATED : commId;
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+document.getElementById('meta-info').innerHTML =
+  '<div class="meta-line"><span class="badge">Q ' + meta.modularity.toFixed(4) + '</span>' +
+  '<span class="badge">' + meta.community_count + ' communities</span></div>' +
+  '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
+  '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+
+const list   = document.getElementById('community-list');
+const search = document.getElementById('search');
+
+function memberRows(members, external) {
+  return members.map(m => '<div class="cmember' + (external ? ' ext' : '') + '" title="' + esc(m) + '">' +
+    esc(shortName(m)) + (external ? ' ⊕' : '') + '</div>').join('');
+}
+
+function hitRows(members, q) {
+  return members.filter(m => m.toLowerCase().includes(q)).map(m => {
+    const i = m.toLowerCase().indexOf(q);
+    return '<div class="cmember" title="' + esc(m) + '">' + esc(m.slice(0, i)) +
+      '<mark>' + esc(m.slice(i, i + q.length)) + '</mark>' + esc(m.slice(i + q.length)) + '</div>';
+  }).join('');
+}
+
+function renderCards() {
+  const q = search.value.trim().toLowerCase();
+  const cards = communities.filter(c => !groupIsolated || !isolatedIds.has(c.id)).map(c => ({
+    key:      c.id,
+    color:    color(c.id),
+    title:    commLabel(c),
+    sub:      esc(c.namespace) + ' &nbsp;·&nbsp; ' + c.internal_count + ' class' + (c.internal_count !== 1 ? 'es' : '') +
+              ' &nbsp;·&nbsp; cohesion ' + percent(c.cohesion),
+    cohesion: c.cohesion,
+    members:  [...c.members, ...c.external_members],
+    rows:     memberRows(c.members, false) + memberRows(c.external_members, true),
+  }));
+  if (groupIsolated) {
+    cards.push({
+      key:      ISOLATED,
+      color:    ISOLATED_COLOR,
+      title:    'Isolated classes',
+      sub:      isolatedMembers.length + ' classes without any dependency',
+      cohesion: null,
+      members:  isolatedMembers,
+      rows:     memberRows(isolatedMembers, false),
+    });
+  }
+
+  list.innerHTML = '';
+  cards.forEach(card => {
+    if (q && !card.members.some(m => m.toLowerCase().includes(q))) return;
+    const el = document.createElement('div');
+    el.className = 'comm-card' + (selected === card.key ? ' active' : '');
+    el.style.setProperty('--c', card.color);
+    el.innerHTML =
+      '<div class="ctitle">' + esc(card.title) + '</div>' +
+      '<div class="csub">' + card.sub + '</div>' +
+      (card.cohesion === null ? '' : '<div class="cbar"><span style="width:' + (card.cohesion * 100) + '%"></span></div>') +
+      (q ? '<div class="chits">' + hitRows(card.members, q) + '</div>' : '') +
+      '<div class="comm-members">' + card.rows + '</div>';
+    el.addEventListener('click', () => select(selected === card.key ? null : card.key));
+    list.appendChild(el);
+  });
+  if (!list.children.length) {
+    list.innerHTML = '<div class="no-match">No class matches “' + esc(search.value.trim()) + '”.</div>';
+  }
+}
+search.addEventListener('input', renderCards);
+
+// ── Node radius helper ─────────────────────────────────────────────────────
+function nodeRadius(d) { return 14 + Math.sqrt(d.size) * 3; }
+const RING_GAP = 5;
+
+// ── SVG setup ──────────────────────────────────────────────────────────────
+const svg  = d3.select('#graph');
+const main = document.getElementById('main');
+let W = main.clientWidth, H = main.clientHeight;
+
+const zoomBehavior = d3.zoom()
+  .scaleExtent([0.1, 8])
+  .on('zoom', e => root.attr('transform', e.transform));
+svg.call(zoomBehavior);
+
+const defs = svg.append('defs');
+function addArrow(id, fill) {
+  defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
+    .attr('markerUnits', 'userSpaceOnUse').attr('markerWidth', 10).attr('markerHeight', 10).attr('orient', 'auto')
+    .append('path').attr('d', 'M0,0L10,5L0,10z').attr('fill', fill);
+}
+addArrow('arrow', '#adb5bd');
+addArrow('arrow-selected', '#212529');
+COLORS.forEach((c, i) => addArrow('arrow-' + i, c));
+
+const root   = svg.append('g');
+const linksG = root.append('g');
+const nodesG = root.append('g');
+
+// ── Force simulation ───────────────────────────────────────────────────────
+const maxWeight = d3.max(links, d => d.weight) || 1;
+
+const sim = d3.forceSimulation()
+  .force('link',    d3.forceLink().id(d => d.id)
+                      .distance(d => 170 - d.weight / maxWeight * 60)
+                      .strength(d => 0.3 + d.weight / maxWeight * 0.4))
+  .force('charge',  d3.forceManyBody().strength(d => -600 - d.size * 10))
+  .force('center',  d3.forceCenter(W / 2, H / 2))
+  .force('collide', d3.forceCollide(d => nodeRadius(d) + RING_GAP + 10));
+
+// ── Links ──────────────────────────────────────────────────────────────────
+function pairOf(d) { return [d.source.community, d.target.community].sort((a, b) => a - b).join('|'); }
+
+const linkEl = linksG.selectAll('path.link').data(links).join('path')
+  .attr('class', 'link')
+  .attr('stroke-width', d => Math.max(1.5, Math.sqrt(d.weight) * 1.8));
+
+const linkHit = linksG.selectAll('path.link-hit').data(links).join('path')
+  .attr('class', 'link-hit')
+  .on('click', (e, d) => { e.stopPropagation(); selectPair(pairOf(d)); });
+
+function towards(n, x, y, r) {
+  const dx = x - n.x, dy = y - n.y, len = Math.hypot(dx, dy) || 1;
+  return [n.x + dx / len * r, n.y + dy / len * r];
+}
+
+/** A curve bent to the left of its direction, so the two directions of a pair do not overlap. */
+function linkPath(d) {
+  const s = d.source, t = d.target;
+  const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1;
+  const cx = (s.x + t.x) / 2 - dy / len * len * 0.15;
+  const cy = (s.y + t.y) / 2 + dx / len * len * 0.15;
+  const [sx, sy] = towards(s, cx, cy, nodeRadius(s));
+  const [tx, ty] = towards(t, cx, cy, nodeRadius(t) + RING_GAP + 3);
+  return 'M' + sx + ',' + sy + 'Q' + cx + ',' + cy + ' ' + tx + ',' + ty;
+}
+
+// ── Nodes ──────────────────────────────────────────────────────────────────
+const drag = d3.drag()
+  .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+  .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+  .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; });
+
+function nodeColor(d) { return d.isolatedGroup ? ISOLATED_COLOR : color(d.community); }
+
+function drawNode(g) {
+  g.each(function(d) {
+    const el = d3.select(this);
+    const r  = nodeRadius(d);
+    el.append('circle').attr('class', 'disc').attr('r', r)
+      .attr('fill', nodeColor(d)).attr('stroke', nodeColor(d))
+      .attr('stroke-dasharray', d.isolatedGroup ? '4 3' : null);
+    if (!d.isolatedGroup) {
+      const ringR = r + RING_GAP, circ = 2 * Math.PI * ringR;
+      el.append('circle').attr('class', 'ring').attr('r', ringR)
+        .attr('fill', 'none').attr('stroke', '#e9ecef').attr('stroke-width', 3);
+      el.append('circle').attr('class', 'ring').attr('r', ringR)
+        .attr('fill', 'none').attr('stroke', nodeColor(d)).attr('stroke-width', 3)
+        .attr('stroke-dasharray', (d.cohesion * circ) + ' ' + circ).attr('transform', 'rotate(-90)');
+    }
+    el.append('text').attr('class', 'label').attr('dy', '-0.2em').attr('text-anchor', 'middle')
+      .text(d.isolatedGroup ? 'Isolated' : commLabel(commById.get(d.community)));
+    el.append('text').attr('class', 'sub').attr('dy', '1em').attr('text-anchor', 'middle')
+      .text(d.isolatedGroup ? d.size + ' cls' : d.size + ' cls · ' + percent(d.cohesion));
+  });
+}
+
+const tooltip = document.getElementById('tooltip');
+let nodeEl = nodesG.selectAll('g.node');
+
+function drawGraph() {
+  const visible = groupIsolated
+    ? nodes.filter(n => !isolatedIds.has(n.community)).concat([groupNode])
+    : nodes;
+
+  nodeEl = nodesG.selectAll('g.node').data(visible, d => d.id).join(
+    enter => enter.append('g').attr('class', 'node').call(drawNode).call(drag),
+  );
+
+  nodeEl
+    .on('mouseover', (e, d) => {
+      tooltip.style.display = 'block';
+      if (d.isolatedGroup) {
+        tooltip.innerHTML = '<strong>Isolated classes</strong><br>' + d.size + ' classes without any dependency';
+        return;
+      }
+      const c = commById.get(d.community);
+      tooltip.innerHTML =
+        '<strong>' + esc(commLabel(c)) + '</strong><br>' +
+        esc(c.namespace) + '<br>' +
+        d.size + ' classes &nbsp;·&nbsp; cohesion ' + percent(d.cohesion);
+    })
+    .on('mousemove', e => {
+      const r = main.getBoundingClientRect();
+      tooltip.style.left = (e.clientX - r.left + 14) + 'px';
+      tooltip.style.top  = (e.clientY - r.top  - 14) + 'px';
+    })
+    .on('mouseout', () => { tooltip.style.display = 'none'; });
+
+  nodeEl.selectAll('text').style('display', showLabels ? null : 'none');
+
+  sim.nodes(visible);
+  sim.force('link').links(links);
+  sim.alpha(0.5).restart();
+}
+
+// ── Tick ───────────────────────────────────────────────────────────────────
+sim.on('tick', () => {
+  linkEl.attr('d', linkPath);
+  linkHit.attr('d', linkPath);
+  nodeEl.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+});
+
+// ── Selection ──────────────────────────────────────────────────────────────
+function select(key) {
+  selected = key;
+  refresh();
+}
+
+function selectPair(pair) {
+  selectedPair = selectedPair === pair ? null : pair;
+  renderLinkPanel();
+  refresh();
+}
+
+function refresh() {
+  renderCards();
+
+  nodeEl.select('circle.disc')
+    .attr('fill-opacity',   d => selected === null ? 0.85 : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 0.95 : 0.15))
+    .attr('stroke-opacity', d => selected === null ? 1    : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 1    : 0.2));
+
+  linkEl
+    .attr('stroke', d => {
+      if (selectedPair !== null) return pairOf(d) === selectedPair ? '#212529' : '#ced4da';
+      if (selected !== null && (d.source.community === selected || d.target.community === selected)) return color(selected);
+      return '#ced4da';
+    })
+    .attr('stroke-opacity', d => {
+      if (selectedPair !== null) return pairOf(d) === selectedPair ? 1 : 0.15;
+      if (selected === null) return 0.7;
+      return d.source.community === selected || d.target.community === selected ? 0.9 : 0.05;
+    })
+    .attr('marker-end', d => {
+      if (selectedPair !== null) return pairOf(d) === selectedPair ? 'url(#arrow-selected)' : 'url(#arrow)';
+      if (selected !== null && (d.source.community === selected || d.target.community === selected)) {
+        return 'url(#arrow-' + (selected % COLORS.length) + ')';
+      }
+      return 'url(#arrow)';
+    });
+
+  document.querySelectorAll('.tree-leaf').forEach(el => {
+    const commId = parseInt(el.dataset.commId ?? '-1', 10);
+    const key    = shownAs(commId);
+    el.querySelector('.leaf-dot').style.background = key === ISOLATED ? ISOLATED_COLOR : color(commId);
+    if (selected === null) {
+      el.classList.remove('dimmed', 'highlighted');
+      el.style.background = '';
+    } else if (key === selected) {
+      el.classList.add('highlighted');
+      el.classList.remove('dimmed');
+      el.style.background = 'color-mix(in srgb,' + (key === ISOLATED ? ISOLATED_COLOR : color(key)) + ' 12%,white)';
+    } else {
+      el.classList.add('dimmed');
+      el.classList.remove('highlighted');
+      el.style.background = '';
+    }
+  });
+  if (selected !== null) {
+    document.querySelectorAll('.tree-folder').forEach(f => f.classList.remove('open'));
+    document.querySelectorAll('.tree-leaf.highlighted').forEach(leaf => {
+      let el = leaf.parentElement;
+      while (el) {
+        if (el.classList.contains('tree-folder')) el.classList.add('open');
+        if (el.id === 'tree-content') break;
+        el = el.parentElement;
+      }
+    });
+  } else {
+    document.querySelectorAll('.tree-folder').forEach(f => f.classList.add('open'));
+  }
+}
+
+// ── Link panel ─────────────────────────────────────────────────────────────
+const linkPanel = document.getElementById('link-panel');
+
+function renderLinkPanel() {
+  if (selectedPair === null) {
+    linkPanel.hidden = true;
+    return;
+  }
+  const [a, b] = selectedPair.split('|').map(Number);
+  const directions = links.filter(l => pairOf(l) === selectedPair);
+  const name = id => esc(commLabel(commById.get(id)));
+
+  let html = '<h2>' + name(a) + (directions.length === 2 ? ' ⇄ ' : ' – ') + name(b) + '</h2>';
+  directions.forEach(l => {
+    html += '<div class="ldir"><div class="ldir-title">' + name(l.source.community) + ' depends on ' +
+      name(l.target.community) + ' (' + l.weight + ')</div>' +
+      l.dependencies.map(([from, to]) =>
+        '<div class="ldep" title="' + esc(from) + ' → ' + esc(to) + '">' + esc(shortName(from)) + ' → ' + esc(shortName(to)) + '</div>',
+      ).join('') + '</div>';
+  });
+  if (directions.length === 2) {
+    html += '<div class="lcycle">These communities depend on each other: a cycle.</div>';
+  }
+  document.getElementById('link-content').innerHTML = html;
+  linkPanel.hidden = false;
+}
+document.getElementById('link-close').addEventListener('click', () => selectPair(selectedPair));
+
+// ── Controls ───────────────────────────────────────────────────────────────
+let showLabels = true;
+
+document.getElementById('btn-labels').addEventListener('click', function() {
+  showLabels = !showLabels;
+  this.classList.toggle('active', showLabels);
+  nodeEl.selectAll('text').style('display', showLabels ? null : 'none');
+});
+
+const btnIsolated = document.getElementById('btn-isolated');
+btnIsolated.hidden = isolatedIds.size < 2;
+btnIsolated.classList.toggle('active', groupIsolated);
+btnIsolated.addEventListener('click', function() {
+  groupIsolated = !groupIsolated;
+  this.classList.toggle('active', groupIsolated);
+  if (selected !== null && (selected === ISOLATED || isolatedIds.has(selected))) selected = null;
+  drawGraph();
+  refresh();
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
+  selected     = null;
+  selectedPair = null;
+  renderLinkPanel();
+  refresh();
+});
+
+// Stats bar
+document.getElementById('statsbar').textContent =
+  'Q = ' + meta.modularity.toFixed(4) +
+  '  ·  ' + meta.community_count + ' communities' +
+  '  ·  ' + links.length + ' inter-community links';
+
+// Resize
+window.addEventListener('resize', () => {
+  W = main.clientWidth; H = main.clientHeight;
+  sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.1).restart();
+});
+
+// ── Tree panel ──────────────────────────────────────────────────────────────
+function buildNamespaceTree() {
+  const root = {};
+  communities.forEach(c => {
+    c.members.forEach(fqn => {
+      const parts = fqn.split('\\');
+      let node = root;
+      parts.forEach((part, i) => {
+        if (i === parts.length - 1) { node[part] = { __leaf: true, commId: c.id, fqn }; }
+        else { if (!node[part] || node[part].__leaf) node[part] = {}; node = node[part]; }
+      });
+    });
+  });
+  return root;
+}
+
+function sortedEntries(node) {
+  return Object.entries(node).sort(([ak, av], [bk, bv]) => {
+    const aLeaf = av.__leaf ? 1 : 0, bLeaf = bv.__leaf ? 1 : 0;
+    return aLeaf - bLeaf || ak.localeCompare(bk);
+  });
+}
+
+/**
+ * The community most classes of a folder belong to, isolated ones aside:
+ * a class of the folder in another community is misplaced.
+ */
+function folderMajority(node) {
+  const counts = new Map();
+  Object.values(node).forEach(v => {
+    if (v.__leaf && !isolatedIds.has(v.commId)) counts.set(v.commId, (counts.get(v.commId) || 0) + 1);
+  });
+  let best = null, bestCount = 0;
+  counts.forEach((n, id) => { if (n > bestCount) { best = id; bestCount = n; } });
+  return { majority: best, communityCount: counts.size };
+}
+
+/** @return {[string, boolean]} the HTML of the node, and whether it holds a misplaced class */
+function renderTreeNode(name, node, depth, majority) {
+  const pad = 'padding-left:' + (depth * 14 + 8) + 'px';
+  if (node.__leaf) {
+    const misplaced = majority !== null && !isolatedIds.has(node.commId) && node.commId !== majority;
+    const dot = '<span class="leaf-dot"></span>';
+    const tag = misplaced
+      ? '<span class="misplaced-tag" title="Most classes of this folder are in ' + esc(commLabel(commById.get(majority))) + '">' +
+        'in ' + esc(commLabel(commById.get(node.commId))) + '</span>'
+      : '';
+    return ['<div class="tree-leaf' + (misplaced ? ' misplaced' : '') + '" data-comm-id="' + node.commId + '" style="' + pad + '" title="' +
+      esc(node.fqn) + '">' + dot + esc(name) + tag + '</div>', misplaced];
+  }
+  const folder = folderMajority(node);
+  let hasMisplaced = false;
+  const inner = sortedEntries(node).map(([k, v]) => {
+    const [html, misplaced] = renderTreeNode(k, v, depth + 1, folder.majority);
+    hasMisplaced = hasMisplaced || misplaced;
+    return html;
+  }).join('');
+  const hint = folder.communityCount > 1 ? '<span class="dir-hint">' + folder.communityCount + ' communities</span>' : '';
+  return ['<div class="tree-folder open' + (hasMisplaced ? ' has-misplaced' : '') + '">' +
+    '<div class="tree-dir" style="' + pad + '" onclick="this.parentElement.classList.toggle(\'open\')">' +
+    '<span class="dir-arrow">▶</span>' + esc(name) + hint + '</div>' +
+    '<div class="tree-children">' + inner + '</div>' +
+    '</div>', hasMisplaced];
+}
+
+const treeContent = document.getElementById('tree-content');
+const treeRoot = buildNamespaceTree();
+treeContent.innerHTML = sortedEntries(treeRoot).map(([k, v]) => renderTreeNode(k, v, 0, folderMajority(treeRoot).majority)[0]).join('');
+
+document.getElementById('only-misplaced').addEventListener('change', e => {
+  treeContent.classList.toggle('only-misplaced', e.target.checked);
+});
+
+treeContent.addEventListener('click', e => {
+  const leaf = e.target.closest('.tree-leaf');
+  if (!leaf) return;
+  const key = shownAs(parseInt(leaf.dataset.commId, 10));
+  select(selected === key ? null : key);
+  const card = list.querySelector('.comm-card.active');
+  if (card) card.scrollIntoView({ block: 'nearest' });
+});
+
+drawGraph();
+refresh();
+})();
+</script>
+</body>
+</html>
