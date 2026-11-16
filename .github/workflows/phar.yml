@@ -1,0 +1,57 @@
+name: PHAR
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build PHAR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+          extensions: zlib
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Compile PHAR
+        run: vendor/bin/box compile
+
+      # Run outside the repository, so that nothing is loaded from vendor/ or resources/
+      - name: Smoke test
+        run: |
+          mkdir /tmp/smoke && cp builds/php-dep-louvain.phar /tmp/smoke/
+          cd /tmp/smoke
+          php php-dep-louvain.phar --help
+          php php-dep-louvain.phar "$GITHUB_WORKSPACE/vendor/nikic/php-parser/lib" > /dev/null
+          php php-dep-louvain.phar --format html --out graph.html "$GITHUB_WORKSPACE/tests/Fixtures/shop"
+
+      - name: Upload PHAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-dep-louvain-phar
+          path: builds/php-dep-louvain.phar
+          retention-days: 90
+
+      - name: Attach PHAR to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" builds/php-dep-louvain.phar --clobber

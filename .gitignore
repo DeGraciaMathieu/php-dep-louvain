@@ -1,3 +1,4 @@
 vendor/
+builds/
 result.html
 .phpunit.result.cache
