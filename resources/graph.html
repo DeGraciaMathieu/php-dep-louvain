@@ -82,6 +82,12 @@ svg{width:100%;height:100%}
 #controls button:hover{background:#f1f3f5}
 #controls button.active{background:#e9ecef;font-weight:600}
 #controls button[hidden]{display:none}
+#wfilter{background:#fff;border:1px solid #dee2e6;border-radius:6px;
+  padding:6px 10px;font-size:12px;color:#495057;display:flex;align-items:center;gap:6px;
+  box-shadow:0 1px 3px rgba(0,0,0,.07)}
+#wfilter input{width:90px}
+#wfilter[hidden]{display:none}
+#wmin-val{font-weight:600;color:#212529;min-width:14px;text-align:right}
 
 /* ── Stats bar ── */
 #statsbar{position:absolute;top:12px;right:12px;background:rgba(255,255,255,.9);
@@ -142,6 +148,7 @@ svg{width:100%;height:100%}
     <span id="iter-label"></span>
   </div>
   <div id="controls">
+    <label id="wfilter" title="Hide the links made of fewer dependencies">Links ≥ <span id="wmin-val">1</span><input type="range" id="wmin" min="1" value="1" step="1"></label>
     <button id="btn-isolated" class="active">Group isolated</button>
     <button id="btn-labels" class="active">Labels</button>
     <button id="btn-reset">⟳ Reset</button>
@@ -210,6 +217,7 @@ function levelContext(levelData) {
     isolatedMembers,
     groupNode:       { id: ISOLATED, isolatedGroup: true, size: isolatedIds.size },
     maxWeight:       d3.max(links, d => d.weight) || 1,
+    directedKeys:    new Set(links.map(l => l.source + '>' + l.target)),
   };
 }
 
@@ -345,12 +353,20 @@ function towards(n, x, y, r) {
   return [n.x + dx / len * r, n.y + dy / len * r];
 }
 
-/** A curve bent to the left of its direction, so the two directions of a pair do not overlap. */
+/**
+ * A one-way dependency is drawn straight; only when the two directions of a
+ * pair both exist does each bend slightly to the left, so they do not overlap.
+ */
 function linkPath(d) {
   const s = d.source, t = d.target;
+  if (!L.directedKeys.has(t.id + '>' + s.id)) {
+    const [sx, sy] = towards(s, t.x, t.y, nodeRadius(s));
+    const [tx, ty] = towards(t, s.x, s.y, nodeRadius(t) + RING_GAP + 3);
+    return 'M' + sx + ',' + sy + 'L' + tx + ',' + ty;
+  }
   const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1;
-  const cx = (s.x + t.x) / 2 - dy / len * len * 0.15;
-  const cy = (s.y + t.y) / 2 + dx / len * len * 0.15;
+  const cx = (s.x + t.x) / 2 - dy / len * len * 0.08;
+  const cy = (s.y + t.y) / 2 + dx / len * len * 0.08;
   const [sx, sy] = towards(s, cx, cy, nodeRadius(s));
   const [tx, ty] = towards(t, cx, cy, nodeRadius(t) + RING_GAP + 3);
   return 'M' + sx + ',' + sy + 'Q' + cx + ',' + cy + ' ' + tx + ',' + ty;
@@ -421,6 +437,7 @@ function drawGraph() {
 
   nodeEl
     .on('mouseover', (e, d) => {
+      hoverFocus(d);
       tooltip.style.display = 'block';
       if (d.isolatedGroup) {
         tooltip.innerHTML = '<strong>Isolated classes</strong><br>' + d.size + ' classes without any dependency';
@@ -437,7 +454,7 @@ function drawGraph() {
       tooltip.style.left = (e.clientX - r.left + 14) + 'px';
       tooltip.style.top  = (e.clientY - r.top  - 14) + 'px';
     })
-    .on('mouseout', () => { tooltip.style.display = 'none'; });
+    .on('mouseout', () => { tooltip.style.display = 'none'; applyGraphStyles(); });
 
   nodeEl.selectAll('text').style('display', showLabels ? null : 'none');
 
@@ -465,12 +482,19 @@ function selectPair(pair) {
   refresh();
 }
 
-function refresh() {
-  renderCards();
+/** A link's resting opacity grows with its weight, so the strong ones stand out. */
+function linkOpacity(d) {
+  return 0.12 + 0.68 * Math.sqrt(d.weight / L.maxWeight);
+}
+
+function applyGraphStyles() {
+  linkEl.style('display',  d => d.weight >= minWeight ? null : 'none');
+  linkHit.style('display', d => d.weight >= minWeight ? null : 'none');
 
   nodeEl.select('circle.disc')
     .attr('fill-opacity',   d => selected === null ? 0.85 : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 0.95 : 0.15))
     .attr('stroke-opacity', d => selected === null ? 1    : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 1    : 0.2));
+  nodeEl.selectAll('text').style('opacity', null);
 
   linkEl
     .attr('stroke', d => {
@@ -479,8 +503,8 @@ function refresh() {
       return '#ced4da';
     })
     .attr('stroke-opacity', d => {
-      if (selectedPair !== null) return pairOf(d) === selectedPair ? 1 : 0.15;
-      if (selected === null) return 0.7;
+      if (selectedPair !== null) return pairOf(d) === selectedPair ? 1 : 0.1;
+      if (selected === null) return linkOpacity(d);
       return d.source.community === selected || d.target.community === selected ? 0.9 : 0.05;
     })
     .attr('marker-end', d => {
@@ -490,6 +514,34 @@ function refresh() {
       }
       return 'url(#arrow)';
     });
+}
+
+/** While a node is hovered, only its neighbourhood keeps its ink. */
+function hoverFocus(d) {
+  const nbr = new Set([d.id]);
+  L.links.forEach(l => {
+    if (l.weight < minWeight) return;
+    if (l.source.id === d.id) nbr.add(l.target.id);
+    if (l.target.id === d.id) nbr.add(l.source.id);
+  });
+  const touches = l => l.source.id === d.id || l.target.id === d.id;
+  const hoverColor = d.isolatedGroup ? ISOLATED_COLOR : color(d.community);
+
+  nodeEl.select('circle.disc')
+    .attr('fill-opacity',   n => nbr.has(n.id) ? 0.95 : 0.12)
+    .attr('stroke-opacity', n => nbr.has(n.id) ? 1 : 0.15);
+  nodeEl.selectAll('text').style('opacity', n => nbr.has(n.id) ? null : 0.25);
+
+  linkEl
+    .attr('stroke', l => touches(l) ? hoverColor : '#ced4da')
+    .attr('stroke-opacity', l => touches(l) ? 0.95 : 0.04)
+    .attr('marker-end', l => touches(l) && !d.isolatedGroup
+      ? 'url(#arrow-' + (d.community % COLORS.length) + ')' : 'url(#arrow)');
+}
+
+function refresh() {
+  renderCards();
+  applyGraphStyles();
 
   document.querySelectorAll('.tree-leaf').forEach(el => {
     const commId = parseInt(el.dataset.commId ?? '-1', 10);
@@ -553,6 +605,15 @@ document.getElementById('link-close').addEventListener('click', () => selectPair
 
 // ── Controls ───────────────────────────────────────────────────────────────
 let showLabels = true;
+let minWeight  = 1;
+
+const wmin    = document.getElementById('wmin');
+const wminVal = document.getElementById('wmin-val');
+wmin.addEventListener('input', () => {
+  minWeight = parseInt(wmin.value, 10);
+  wminVal.textContent = String(minWeight);
+  applyGraphStyles();
+});
 
 document.getElementById('btn-labels').addEventListener('click', function() {
   showLabels = !showLabels;
@@ -686,6 +747,11 @@ function showLevel(idx) {
   groupIsolated = L.isolatedIds.size > 1;
   selected      = null;
   selectedPair  = null;
+  minWeight     = 1;
+  wmin.value    = '1';
+  wmin.max      = String(Math.max(2, L.maxWeight));
+  wminVal.textContent = '1';
+  document.getElementById('wfilter').hidden = L.maxWeight < 2;
   btnIsolated.hidden = L.isolatedIds.size < 2;
   btnIsolated.classList.toggle('active', groupIsolated);
   slider.value = String(idx + 1);
