@@ -1,13 +1,9 @@
 import type { Graph } from './graph.js'
 
-export interface VisData {
-  meta: {
-    analyzed_path: string
-    modularity: number
-    community_count: number
-    node_count: number
-    internal_node_count: number
-  }
+export interface VisLevel {
+  level: number
+  modularity: number
+  community_count: number
   nodes: Array<{
     id:        string
     community: number
@@ -32,13 +28,23 @@ export interface VisData {
   }>
 }
 
-export function buildVisData(
+export interface VisData {
+  meta: {
+    analyzed_path: string
+    node_count: number
+    internal_node_count: number
+  }
+  levels: VisLevel[]
+}
+
+export function buildVisLevel(
   jsonOutput: ReturnType<typeof import('./index.js')['toJsonOutputRaw']>,
   g: Graph,
   community: Int32Array,
-): VisData {
+  level: number,
+): VisLevel {
   // One node per community
-  const nodes: VisData['nodes'] = jsonOutput.communities.map(c => ({
+  const nodes: VisLevel['nodes'] = jsonOutput.communities.map(c => ({
     id:        `community-${c.id}`,
     community: c.id,
     size:      c.internal_count,
@@ -62,13 +68,15 @@ export function buildVisData(
     }
   }
 
-  const links: VisData['links'] = Array.from(commWeights.entries()).map(([key, weight]) => {
+  const links: VisLevel['links'] = Array.from(commWeights.entries()).map(([key, weight]) => {
     const [a, b] = key.split('|')
     return { source: `community-${a}`, target: `community-${b}`, weight }
   })
 
   return {
-    meta:        jsonOutput.meta,
+    level,
+    modularity:      jsonOutput.meta.modularity,
+    community_count: jsonOutput.meta.community_count,
     nodes,
     links,
     communities: jsonOutput.communities,
@@ -131,6 +139,14 @@ svg{width:100%;height:100%}
 #controls button:hover{background:#f1f3f5}
 #controls button.active{background:#e9ecef;font-weight:600}
 
+/* ── Iteration slider ── */
+#iterbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+  background:#fff;border:1px solid #dee2e6;border-radius:6px;padding:8px 14px;
+  display:flex;align-items:center;gap:10px;font-size:12px;color:#495057;
+  box-shadow:0 1px 3px rgba(0,0,0,.07)}
+#iterbar input{width:160px}
+#iter-label{font-weight:600;color:#212529;white-space:nowrap}
+
 /* ── Stats bar ── */
 #statsbar{position:absolute;top:12px;right:12px;background:rgba(255,255,255,.9);
   border:1px solid #dee2e6;border-radius:6px;padding:6px 12px;
@@ -170,7 +186,12 @@ svg{width:100%;height:100%}
 <div id="main">
   <svg id="graph"></svg>
   <div id="tooltip"></div>
-  <div id="statsbar" id="statsbar"></div>
+  <div id="statsbar"></div>
+  <div id="iterbar">
+    <span>Iteration</span>
+    <input type="range" id="iter-slider" min="1" step="1">
+    <span id="iter-label"></span>
+  </div>
   <div id="controls">
     <button id="btn-labels" class="active">Labels</button>
     <button id="btn-reset">⟳ Reset</button>
@@ -192,37 +213,46 @@ const COLORS = [
   '#d37295','#a0cbe8','#499894','#86bcb6','#e6925a',
 ];
 
-const { nodes, links, communities, meta } = DATA;
+const { meta, levels } = DATA;
+
+let currentLevel = levels.length - 1;
+let showLabels   = true;
+let nodeEl, linkEl, labelEl;
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-document.getElementById('meta-info').innerHTML =
-  '<div class="meta-line"><span class="badge">Q ' + meta.modularity.toFixed(4) + '</span>' +
-  '<span class="badge">' + meta.community_count + ' communities</span></div>' +
-  '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
-  '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+function renderMeta(L) {
+  document.getElementById('meta-info').innerHTML =
+    '<div class="meta-line"><span class="badge">Q ' + L.modularity.toFixed(4) + '</span>' +
+    '<span class="badge">' + L.community_count + ' communities</span></div>' +
+    '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
+    '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+}
 
-const list = document.getElementById('community-list');
-communities.forEach(c => {
-  const color = COLORS[c.id % COLORS.length];
-  const el    = document.createElement('div');
-  el.className = 'comm-card';
-  el.style.setProperty('--c', color);
-  el.dataset.commId = String(c.id);
-  el.innerHTML =
-    '<div class="ctitle">Community ' + c.id + '</div>' +
-    '<div class="csub">' + c.namespace + ' &nbsp;·&nbsp; ' +
-      c.internal_count + ' class' + (c.internal_count !== 1 ? 'es' : '') +
-      ' &nbsp;·&nbsp; density ' + c.density.toFixed(2) + '</div>' +
-    '<div class="comm-members">' +
-      c.members.map(m => '<div class="cmember" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + '</div>').join('') +
-      c.external_members.map(m => '<div class="cmember ext" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + ' ⊕</div>').join('') +
-    '</div>';
-  el.addEventListener('click', () => {
-    el.classList.toggle('active');
-    highlightCommunity(el.classList.contains('active') ? c.id : null);
+function renderSidebar(L) {
+  const list = document.getElementById('community-list');
+  list.innerHTML = '';
+  L.communities.forEach(c => {
+    const color = COLORS[c.id % COLORS.length];
+    const el    = document.createElement('div');
+    el.className = 'comm-card';
+    el.style.setProperty('--c', color);
+    el.dataset.commId = String(c.id);
+    el.innerHTML =
+      '<div class="ctitle">Community ' + c.id + '</div>' +
+      '<div class="csub">' + c.namespace + ' &nbsp;·&nbsp; ' +
+        c.internal_count + ' class' + (c.internal_count !== 1 ? 'es' : '') +
+        ' &nbsp;·&nbsp; density ' + c.density.toFixed(2) + '</div>' +
+      '<div class="comm-members">' +
+        c.members.map(m => '<div class="cmember" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + '</div>').join('') +
+        c.external_members.map(m => '<div class="cmember ext" title="' + m + '">' + (m.split('\\\\').pop() ?? m) + ' ⊕</div>').join('') +
+      '</div>';
+    el.addEventListener('click', () => {
+      el.classList.toggle('active');
+      highlightCommunity(el.classList.contains('active') ? c.id : null);
+    });
+    list.appendChild(el);
   });
-  list.appendChild(el);
-});
+}
 
 function highlightCommunity(commId) {
   nodeEl.selectAll('circle')
@@ -282,99 +312,102 @@ const linksG = root.append('g');
 const nodesG = root.append('g');
 
 // ── Force simulation ───────────────────────────────────────────────────────
-const maxWeight = d3.max(links, d => d.weight) || 1;
-
-const sim = d3.forceSimulation(nodes)
-  .force('link',    d3.forceLink(links).id(d => d.id)
-                      .distance(d => 160 - d.weight / maxWeight * 60)
-                      .strength(d => 0.3 + d.weight / maxWeight * 0.4))
+const sim = d3.forceSimulation()
+  .force('link',    d3.forceLink().id(d => d.id))
   .force('charge',  d3.forceManyBody().strength(d => -600 - d.size * 10))
   .force('center',  d3.forceCenter(W / 2, H / 2))
   .force('collide', d3.forceCollide(d => nodeRadius(d) + 10));
 
-// ── Links ──────────────────────────────────────────────────────────────────
-const linkEl = linksG.selectAll('line').data(links).join('line')
-  .attr('class', 'link')
-  .attr('stroke-width', d => Math.max(1, Math.sqrt(d.weight) * 2))
-  .attr('stroke-opacity', 0.5);
-
-// ── Nodes ──────────────────────────────────────────────────────────────────
-const nodeEl = nodesG.selectAll('g').data(nodes).join('g').attr('class', 'node')
-  .call(d3.drag()
-    .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-    .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
-    .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
-
-nodeEl.append('circle')
-  .attr('r',             d => nodeRadius(d))
-  .attr('fill',          d => COLORS[d.community % COLORS.length])
-  .attr('fill-opacity',  0.85)
-  .attr('stroke',        d => COLORS[d.community % COLORS.length])
-  .attr('stroke-opacity', 1);
-
-const labelEl = nodeEl.append('text')
-  .attr('dy', '-0.2em').attr('text-anchor', 'middle')
-  .text(d => 'C' + d.community);
-
-nodeEl.append('text')
-  .attr('class', 'sub')
-  .attr('dy', '1em').attr('text-anchor', 'middle')
-  .text(d => d.size + ' cls');
-
-const tooltip = document.getElementById('tooltip');
-nodeEl.on('mouseover', (e, d) => {
-    tooltip.style.display = 'block';
-    tooltip.innerHTML =
-      '<strong>Community ' + d.community + '</strong><br>' +
-      d.namespace + '<br>' +
-      d.size + ' classes &nbsp;·&nbsp; density ' + d.density.toFixed(2);
-  })
-  .on('mousemove', e => {
-    const r = main.getBoundingClientRect();
-    tooltip.style.left = (e.clientX - r.left + 14) + 'px';
-    tooltip.style.top  = (e.clientY - r.top  - 14) + 'px';
-  })
-  .on('mouseout', () => { tooltip.style.display = 'none'; });
-
-// ── Tick ───────────────────────────────────────────────────────────────────
 sim.on('tick', () => {
   linkEl.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
         .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
   nodeEl.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
 });
 
-// ── Controls ───────────────────────────────────────────────────────────────
-let showLabels = true;
+const dragBehavior = d3.drag()
+  .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+  .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+  .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; });
 
-document.getElementById('btn-labels').addEventListener('click', function() {
-  showLabels = !showLabels;
-  this.classList.toggle('active', showLabels);
-  labelEl.style('display', showLabels ? null : 'none');
-  nodeEl.selectAll('text.sub').style('display', showLabels ? null : 'none');
-});
+const tooltip = document.getElementById('tooltip');
 
-document.getElementById('btn-reset').addEventListener('click', () => {
-  svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
-  document.querySelectorAll('.comm-card.active').forEach(el => el.classList.remove('active'));
-  highlightCommunity(null);
-});
+function renderGraph(L) {
+  // Seed unseen nodes at the position of the same-id node from the level shown before
+  const prevPos = new Map(sim.nodes().map(d => [d.id, d]));
+  for (const n of L.nodes) {
+    if (n.x === undefined) {
+      const p = prevPos.get(n.id);
+      if (p) { n.x = p.x; n.y = p.y; }
+    }
+  }
 
-// Stats bar
-document.getElementById('statsbar').textContent =
-  'Q = ' + meta.modularity.toFixed(4) +
-  '  ·  ' + meta.community_count + ' communities' +
-  '  ·  ' + links.length + ' inter-community links';
+  const maxWeight = d3.max(L.links, d => d.weight) || 1;
 
-// Resize
-window.addEventListener('resize', () => {
-  W = main.clientWidth; H = main.clientHeight;
-  sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.1).restart();
-});
+  linkEl = linksG.selectAll('line').data(L.links).join('line')
+    .attr('class', 'link')
+    .attr('stroke', '#ced4da')
+    .attr('stroke-width', d => Math.max(1, Math.sqrt(d.weight) * 2))
+    .attr('stroke-opacity', 0.5);
+
+  nodeEl = nodesG.selectAll('g.node').data(L.nodes, d => d.id).join(enter => {
+    const g = enter.append('g').attr('class', 'node');
+    g.append('circle');
+    g.append('text').attr('class', 'label').attr('dy', '-0.2em').attr('text-anchor', 'middle');
+    g.append('text').attr('class', 'sub').attr('dy', '1em').attr('text-anchor', 'middle');
+    return g;
+  });
+
+  nodeEl.call(dragBehavior);
+
+  nodeEl.select('circle')
+    .attr('r',             d => nodeRadius(d))
+    .attr('fill',          d => COLORS[d.community % COLORS.length])
+    .attr('fill-opacity',  0.85)
+    .attr('stroke',        d => COLORS[d.community % COLORS.length])
+    .attr('stroke-opacity', 1);
+
+  labelEl = nodeEl.select('text.label')
+    .text(d => 'C' + d.community)
+    .style('display', showLabels ? null : 'none');
+  nodeEl.select('text.sub')
+    .text(d => d.size + ' cls')
+    .style('display', showLabels ? null : 'none');
+
+  nodeEl.on('mouseover', (e, d) => {
+      tooltip.style.display = 'block';
+      tooltip.innerHTML =
+        '<strong>Community ' + d.community + '</strong><br>' +
+        d.namespace + '<br>' +
+        d.size + ' classes &nbsp;·&nbsp; density ' + d.density.toFixed(2);
+    })
+    .on('mousemove', e => {
+      const r = main.getBoundingClientRect();
+      tooltip.style.left = (e.clientX - r.left + 14) + 'px';
+      tooltip.style.top  = (e.clientY - r.top  - 14) + 'px';
+    })
+    .on('mouseout', () => { tooltip.style.display = 'none'; });
+
+  sim.nodes(L.nodes);
+  sim.force('link')
+    .links(L.links)
+    .distance(d => 160 - d.weight / maxWeight * 60)
+    .strength(d => 0.3 + d.weight / maxWeight * 0.4);
+  sim.alpha(0.6).restart();
+}
+
+// ── Stats bar ──────────────────────────────────────────────────────────────
+function renderStats(L) {
+  document.getElementById('statsbar').textContent =
+    'Iteration ' + L.level + '/' + levels.length +
+    '  ·  Q = ' + L.modularity.toFixed(4) +
+    '  ·  ' + L.community_count + ' communities' +
+    '  ·  ' + L.links.length + ' inter-community links';
+}
 
 // ── Tree panel ──────────────────────────────────────────────────────────────
-function buildNamespaceTree() {
+function buildNamespaceTree(L) {
   const root = {};
-  communities.forEach(c => {
+  L.communities.forEach(c => {
     const color = COLORS[c.id % COLORS.length];
     c.members.forEach(fqn => {
       const parts = fqn.split('\\\\');
@@ -405,12 +438,14 @@ function renderTreeNode(name, node, depth) {
     '</div>';
 }
 
-const treeRoot = buildNamespaceTree();
-document.getElementById('tree-content').innerHTML =
-  Object.entries(treeRoot).sort(([ak, av], [bk, bv]) => {
-    const aLeaf = av.__leaf ? 1 : 0, bLeaf = bv.__leaf ? 1 : 0;
-    return aLeaf - bLeaf || ak.localeCompare(bk);
-  }).map(([k, v]) => renderTreeNode(k, v, 0)).join('');
+function renderTree(L) {
+  const treeRoot = buildNamespaceTree(L);
+  document.getElementById('tree-content').innerHTML =
+    Object.entries(treeRoot).sort(([ak, av], [bk, bv]) => {
+      const aLeaf = av.__leaf ? 1 : 0, bLeaf = bv.__leaf ? 1 : 0;
+      return aLeaf - bLeaf || ak.localeCompare(bk);
+    }).map(([k, v]) => renderTreeNode(k, v, 0)).join('');
+}
 
 document.getElementById('tree-content').addEventListener('click', e => {
   const leaf = e.target.closest('.tree-leaf');
@@ -426,6 +461,48 @@ document.getElementById('tree-content').addEventListener('click', e => {
   }
   highlightCommunity(isActive ? null : commId);
 });
+
+// ── Level switching ────────────────────────────────────────────────────────
+const slider    = document.getElementById('iter-slider');
+const iterLabel = document.getElementById('iter-label');
+
+function showLevel(idx) {
+  currentLevel = idx;
+  const L = levels[idx];
+  renderMeta(L);
+  renderSidebar(L);
+  renderTree(L);
+  renderGraph(L);
+  renderStats(L);
+  slider.value = String(idx + 1);
+  iterLabel.textContent = L.level + ' / ' + levels.length;
+}
+
+slider.max = String(levels.length);
+slider.addEventListener('input', () => showLevel(parseInt(slider.value, 10) - 1));
+if (levels.length < 2) document.getElementById('iterbar').style.display = 'none';
+
+// ── Controls ───────────────────────────────────────────────────────────────
+document.getElementById('btn-labels').addEventListener('click', function() {
+  showLabels = !showLabels;
+  this.classList.toggle('active', showLabels);
+  labelEl.style('display', showLabels ? null : 'none');
+  nodeEl.selectAll('text.sub').style('display', showLabels ? null : 'none');
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
+  document.querySelectorAll('.comm-card.active').forEach(el => el.classList.remove('active'));
+  highlightCommunity(null);
+});
+
+// Resize
+window.addEventListener('resize', () => {
+  W = main.clientWidth; H = main.clientHeight;
+  sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.1).restart();
+});
+
+showLevel(currentLevel);
 
 })();
 </script>

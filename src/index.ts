@@ -16,9 +16,9 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { buildGraph }                  from './graph.js'
-import { louvain, computeModularity }  from './louvain.js'
-import { buildVisData, generateHtml }  from './visualize.js'
+import { buildGraph }                                   from './graph.js'
+import { louvain, louvainLevels, computeModularity }    from './louvain.js'
+import { buildVisLevel, generateHtml }                  from './visualize.js'
 import type { InputData }              from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ export function toJsonOutputRaw(
       types: [...new Set(
         internalMembers
           .map(f => classMap.get(f)?.type)
-          .filter((t): t is string => !!t),
+          .filter((t): t is NonNullable<typeof t> => !!t),
       )],
     }
   })
@@ -207,35 +207,47 @@ function main() {
     process.exit(1)
   }
 
-  const g         = buildGraph(data, internalOnly)
-  const community = louvain(g, maxLevels)
-  const Q         = computeModularity(g, community)
+  const g = buildGraph(data, internalOnly)
 
   let output: string
 
-  if (format === 'text') {
-    output = toTextOutput(g.labels, g.isInternal, community, Q)
+  if (format === 'html') {
+    const visLevels = louvainLevels(g, maxLevels).map((community, idx) => {
+      const Q          = computeModularity(g, community)
+      const jsonResult = toJsonOutputRaw(data, g.labels, g.isInternal, g.adj, community, Q)
 
-  } else if (format === 'html') {
-    const jsonResult = toJsonOutputRaw(data, g.labels, g.isInternal, g.adj, community, Q)
+      // Remap community ids to match the sorted order in jsonResult
+      const commIdByLabel = new Map<string, number>()
+      for (const comm of jsonResult.communities) {
+        for (const m of comm.members)          commIdByLabel.set(m, comm.id)
+        for (const m of comm.external_members) commIdByLabel.set(m, comm.id)
+      }
+      const remappedCommunity = Int32Array.from(
+        g.labels, label => commIdByLabel.get(label) ?? 0
+      )
 
-    // Remap community ids to match the sorted order in jsonResult
-    const commIdByLabel = new Map<string, number>()
-    for (const comm of jsonResult.communities) {
-      for (const m of comm.members)          commIdByLabel.set(m, comm.id)
-      for (const m of comm.external_members) commIdByLabel.set(m, comm.id)
-    }
-    const remappedCommunity = Int32Array.from(
-      g.labels, label => commIdByLabel.get(label) ?? 0
-    )
+      return buildVisLevel(jsonResult, g, remappedCommunity, idx + 1)
+    })
 
-    output = generateHtml(buildVisData(jsonResult, g, remappedCommunity))
+    output = generateHtml({
+      meta: {
+        analyzed_path:       data.meta.analyzed_path,
+        node_count:          g.labels.length,
+        internal_node_count: g.isInternal.filter(Boolean).length,
+      },
+      levels: visLevels,
+    })
 
   } else {
-    output = JSON.stringify(
-      toJsonOutputRaw(data, g.labels, g.isInternal, g.adj, community, Q),
-      null, 2,
-    )
+    const community = louvain(g, maxLevels)
+    const Q         = computeModularity(g, community)
+
+    output = format === 'text'
+      ? toTextOutput(g.labels, g.isInternal, community, Q)
+      : JSON.stringify(
+          toJsonOutputRaw(data, g.labels, g.isInternal, g.adj, community, Q),
+          null, 2,
+        )
   }
 
   if (outputFile) {

@@ -175,29 +175,45 @@ function buildSuperGraph(
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Renumber communities as 0 … k-1 (dense, stable order). */
+function denseRemap(community: Int32Array): Int32Array {
+  const remap = new Map<number, number>()
+  for (const c of community) {
+    if (!remap.has(c)) remap.set(c, remap.size)
+  }
+  return Int32Array.from(community, c => remap.get(c)!)
+}
+
 /**
  * Run the multi-level Louvain algorithm on `graph`.
- * Returns a compact community assignment for each node (0-indexed, dense).
+ * Returns one community assignment per level (0-indexed, dense), each mapped
+ * back to the original nodes. The last entry is the converged partition.
  */
-export function louvain(graph: Graph, maxLevels = 15): Int32Array {
+export function louvainLevels(graph: Graph, maxLevels = 15): Int32Array[] {
   let g = graph
 
   // hierarchy[i] = index of node i in the current-level graph
   let hierarchy: Int32Array | null = null
-  let finalComm = Int32Array.from({ length: graph.n }, (_, i) => i)
+  const snapshots: Int32Array[] = []
 
   for (let level = 0; level < maxLevels; level++) {
     const state    = initPhase1(g)
     const improved = runPhase1(g, state)
 
     // Map current-level communities back to original node indices
-    const currComm = state.community
+    const currComm  = state.community
+    const finalComm = new Int32Array(graph.n)
     if (hierarchy === null) {
-      finalComm = currComm.slice()
+      finalComm.set(currComm)
     } else {
       for (let i = 0; i < graph.n; i++) {
         finalComm[i] = currComm[hierarchy[i]]
       }
+    }
+
+    // A level with no move repeats the previous partition → skip the duplicate
+    if (improved || snapshots.length === 0) {
+      snapshots.push(denseRemap(finalComm))
     }
 
     if (!improved) break
@@ -220,12 +236,16 @@ export function louvain(graph: Graph, maxLevels = 15): Int32Array {
     if (g.n <= 1) break
   }
 
-  // Renumber communities as 0 … k-1 (dense, stable order)
-  const remap = new Map<number, number>()
-  for (const c of finalComm) {
-    if (!remap.has(c)) remap.set(c, remap.size)
-  }
-  return Int32Array.from(finalComm, c => remap.get(c)!)
+  return snapshots
+}
+
+/**
+ * Run the multi-level Louvain algorithm on `graph`.
+ * Returns a compact community assignment for each node (0-indexed, dense).
+ */
+export function louvain(graph: Graph, maxLevels = 15): Int32Array {
+  const levels = louvainLevels(graph, maxLevels)
+  return levels[levels.length - 1]
 }
 
 /**
