@@ -47,6 +47,14 @@ final class OutputFormatTest extends FeatureTestCase
         $this->assertStringContainsString('Shop\\\\Billing\\\\BillingService', $page);
     }
 
+    public function test_the_html_page_embeds_every_louvain_level(): void
+    {
+        $this->runCommand(['--format', 'html', '--out', $this->outputFile, self::SHOP]);
+
+        $page = (string) file_get_contents($this->outputFile);
+        $this->assertStringContainsString('"levels":[{"level":1,', $page);
+    }
+
     public function test_it_writes_the_report_to_a_file_instead_of_printing_it(): void
     {
         $result = $this->runCommand(['--format', 'text', '--out', $this->outputFile, self::SHOP]);

@@ -37,15 +37,29 @@ final class Louvain
      */
     public static function detect(Graph $graph, int $maxLevels = 15): array
     {
+        $levels = self::detectLevels($graph, $maxLevels);
+
+        return $levels[array_key_last($levels)];
+    }
+
+    /**
+     * Run the multi-level Louvain algorithm on $graph, keeping the partition
+     * reached after each phase 1 + aggregation cycle.
+     *
+     * @return list<int[]> one partition per level, each mapped back to the original
+     *         nodes and numbered as in detect(); the last one is the converged partition
+     */
+    public static function detectLevels(Graph $graph, int $maxLevels = 15): array
+    {
         if ($graph->n === 0) {
-            return [];
+            return [[]];
         }
 
         $g = $graph;
 
         // hierarchy[i] = index of node i in the current-level graph
         $hierarchy = null;
-        $finalComm = range(0, $graph->n - 1);
+        $snapshots = [];
 
         for ($level = 0; $level < $maxLevels; $level++) {
             [$currComm, $improved] = self::runPhase1($g);
@@ -54,9 +68,15 @@ final class Louvain
             if ($hierarchy === null) {
                 $finalComm = $currComm;
             } else {
+                $finalComm = [];
                 for ($i = 0; $i < $graph->n; $i++) {
                     $finalComm[$i] = $currComm[$hierarchy[$i]];
                 }
+            }
+
+            // A level without any move repeats the previous partition → skip the duplicate
+            if ($improved || $snapshots === []) {
+                $snapshots[] = self::numberBySize($finalComm);
             }
 
             if (!$improved) {
@@ -84,7 +104,7 @@ final class Louvain
             }
         }
 
-        return self::numberBySize($finalComm);
+        return $snapshots;
     }
 
     /**

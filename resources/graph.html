@@ -67,6 +67,14 @@ svg{width:100%;height:100%}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lcycle{margin-top:10px;padding:6px 8px;border-radius:6px;background:#fff3e0;color:#9a4b00}
 
+/* ── Iteration slider ── */
+#iterbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+  background:#fff;border:1px solid #dee2e6;border-radius:6px;padding:8px 14px;
+  display:flex;align-items:center;gap:10px;font-size:12px;color:#495057;
+  box-shadow:0 1px 3px rgba(0,0,0,.07)}
+#iterbar input{width:160px}
+#iter-label{font-weight:600;color:#212529;white-space:nowrap}
+
 /* ── Controls ── */
 #controls{position:absolute;bottom:16px;right:16px;display:flex;gap:6px}
 #controls button{background:#fff;border:1px solid #dee2e6;border-radius:6px;
@@ -128,6 +136,11 @@ svg{width:100%;height:100%}
     <button id="link-close" title="Close">×</button>
     <div id="link-content"></div>
   </div>
+  <div id="iterbar">
+    <span>Iteration</span>
+    <input type="range" id="iter-slider" min="1" step="1">
+    <span id="iter-label"></span>
+  </div>
   <div id="controls">
     <button id="btn-isolated" class="active">Group isolated</button>
     <button id="btn-labels" class="active">Labels</button>
@@ -155,7 +168,7 @@ const COLORS = [
 const ISOLATED_COLOR = '#adb5bd';
 const ISOLATED = 'isolated';
 
-const { nodes, links, communities, meta } = DATA;
+const { meta, levels } = DATA;
 
 function color(commId) { return COLORS[commId % COLORS.length]; }
 function shortName(fqcn) { return fqcn.split('\\').pop(); }
@@ -168,39 +181,60 @@ function percent(x) { return Math.round(x * 100) + ' %'; }
 function baseLabel(c) {
   return c.namespace && c.namespace !== '(root)' ? shortName(c.namespace) : 'Community';
 }
-const labelCount = new Map();
-communities.forEach(c => labelCount.set(baseLabel(c), (labelCount.get(baseLabel(c)) || 0) + 1));
-function commLabel(c) {
-  return labelCount.get(baseLabel(c)) > 1 ? baseLabel(c) + ' #' + c.id : baseLabel(c);
+
+/** Everything the page derives from one level's partition, built once per level. */
+function levelContext(levelData) {
+  if (levelData.ctx) return levelData.ctx;
+  const { nodes, links, communities } = levelData;
+
+  const labelCount = new Map();
+  communities.forEach(c => labelCount.set(baseLabel(c), (labelCount.get(baseLabel(c)) || 0) + 1));
+
+  // A community of one class that no link touches: grouped into one node to keep the map readable
+  const linkedComms = new Set();
+  links.forEach(l => {
+    linkedComms.add(+l.source.split('-').pop());
+    linkedComms.add(+l.target.split('-').pop());
+  });
+  const isolatedIds = new Set(communities.filter(c => c.size === 1 && !linkedComms.has(c.id)).map(c => c.id));
+  const isolatedMembers = communities.filter(c => isolatedIds.has(c.id)).flatMap(c => [...c.members, ...c.external_members]);
+
+  return levelData.ctx = {
+    level:           levelData.level,
+    modularity:      levelData.modularity,
+    community_count: levelData.community_count,
+    nodes, links, communities,
+    labelCount,
+    commById:        new Map(communities.map(c => [c.id, c])),
+    isolatedIds,
+    isolatedMembers,
+    groupNode:       { id: ISOLATED, isolatedGroup: true, size: isolatedIds.size },
+    maxWeight:       d3.max(links, d => d.weight) || 1,
+  };
 }
 
-const commById = new Map(communities.map(c => [c.id, c]));
-
-// A community of one class that no link touches: grouped into one node to keep the map readable
-const linkedComms = new Set();
-links.forEach(l => {
-  linkedComms.add(+l.source.split('-').pop());
-  linkedComms.add(+l.target.split('-').pop());
-});
-const isolatedIds = new Set(communities.filter(c => c.size === 1 && !linkedComms.has(c.id)).map(c => c.id));
-const isolatedMembers = communities.filter(c => isolatedIds.has(c.id)).flatMap(c => [...c.members, ...c.external_members]);
-const groupNode = { id: ISOLATED, isolatedGroup: true, size: isolatedIds.size };
-
-let groupIsolated = isolatedIds.size > 1;
+let L             = null; // context of the level on display
+let groupIsolated = false;
 let selected      = null; // community id, ISOLATED, or null
 let selectedPair  = null; // "a|b" community pair of the selected link, or null
 
+function commLabel(c) {
+  return L.labelCount.get(baseLabel(c)) > 1 ? baseLabel(c) + ' #' + c.id : baseLabel(c);
+}
+
 /** The id under which a community is shown: isolated ones fold into the group when grouped. */
 function shownAs(commId) {
-  return groupIsolated && isolatedIds.has(commId) ? ISOLATED : commId;
+  return groupIsolated && L.isolatedIds.has(commId) ? ISOLATED : commId;
 }
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-document.getElementById('meta-info').innerHTML =
-  '<div class="meta-line"><span class="badge">Q ' + meta.modularity.toFixed(4) + '</span>' +
-  '<span class="badge">' + meta.community_count + ' communities</span></div>' +
-  '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
-  '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+function renderMeta() {
+  document.getElementById('meta-info').innerHTML =
+    '<div class="meta-line"><span class="badge">Q ' + L.modularity.toFixed(4) + '</span>' +
+    '<span class="badge">' + L.community_count + ' communities</span></div>' +
+    '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
+    '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+}
 
 const list   = document.getElementById('community-list');
 const search = document.getElementById('search');
@@ -220,7 +254,7 @@ function hitRows(members, q) {
 
 function renderCards() {
   const q = search.value.trim().toLowerCase();
-  const cards = communities.filter(c => !groupIsolated || !isolatedIds.has(c.id)).map(c => ({
+  const cards = L.communities.filter(c => !groupIsolated || !L.isolatedIds.has(c.id)).map(c => ({
     key:      c.id,
     color:    color(c.id),
     title:    commLabel(c),
@@ -235,10 +269,10 @@ function renderCards() {
       key:      ISOLATED,
       color:    ISOLATED_COLOR,
       title:    'Isolated classes',
-      sub:      isolatedMembers.length + ' classes without any dependency',
+      sub:      L.isolatedMembers.length + ' classes without any dependency',
       cohesion: null,
-      members:  isolatedMembers,
-      rows:     memberRows(isolatedMembers, false),
+      members:  L.isolatedMembers,
+      rows:     memberRows(L.isolatedMembers, false),
     });
   }
 
@@ -292,12 +326,10 @@ const linksG = root.append('g');
 const nodesG = root.append('g');
 
 // ── Force simulation ───────────────────────────────────────────────────────
-const maxWeight = d3.max(links, d => d.weight) || 1;
-
 const sim = d3.forceSimulation()
   .force('link',    d3.forceLink().id(d => d.id)
-                      .distance(d => 170 - d.weight / maxWeight * 60)
-                      .strength(d => 0.3 + d.weight / maxWeight * 0.4))
+                      .distance(d => 170 - d.weight / L.maxWeight * 60)
+                      .strength(d => 0.3 + d.weight / L.maxWeight * 0.4))
   .force('charge',  d3.forceManyBody().strength(d => -600 - d.size * 10))
   .force('center',  d3.forceCenter(W / 2, H / 2))
   .force('collide', d3.forceCollide(d => nodeRadius(d) + RING_GAP + 10));
@@ -305,13 +337,8 @@ const sim = d3.forceSimulation()
 // ── Links ──────────────────────────────────────────────────────────────────
 function pairOf(d) { return [d.source.community, d.target.community].sort((a, b) => a - b).join('|'); }
 
-const linkEl = linksG.selectAll('path.link').data(links).join('path')
-  .attr('class', 'link')
-  .attr('stroke-width', d => Math.max(1.5, Math.sqrt(d.weight) * 1.8));
-
-const linkHit = linksG.selectAll('path.link-hit').data(links).join('path')
-  .attr('class', 'link-hit')
-  .on('click', (e, d) => { e.stopPropagation(); selectPair(pairOf(d)); });
+let linkEl  = linksG.selectAll('path.link');
+let linkHit = linksG.selectAll('path.link-hit');
 
 function towards(n, x, y, r) {
   const dx = x - n.x, dy = y - n.y, len = Math.hypot(dx, dy) || 1;
@@ -353,7 +380,7 @@ function drawNode(g) {
         .attr('stroke-dasharray', (d.cohesion * circ) + ' ' + circ).attr('transform', 'rotate(-90)');
     }
     el.append('text').attr('class', 'label').attr('dy', '-0.2em').attr('text-anchor', 'middle')
-      .text(d.isolatedGroup ? 'Isolated' : commLabel(commById.get(d.community)));
+      .text(d.isolatedGroup ? 'Isolated' : commLabel(L.commById.get(d.community)));
     el.append('text').attr('class', 'sub').attr('dy', '1em').attr('text-anchor', 'middle')
       .text(d.isolatedGroup ? d.size + ' cls' : d.size + ' cls · ' + percent(d.cohesion));
   });
@@ -363,13 +390,34 @@ const tooltip = document.getElementById('tooltip');
 let nodeEl = nodesG.selectAll('g.node');
 
 function drawGraph() {
+  // Keep the layout readable across levels: a community kept from the level
+  // shown before starts from its previous position
+  const prev = new Map(sim.nodes().map(d => [d.id, d]));
+
   const visible = groupIsolated
-    ? nodes.filter(n => !isolatedIds.has(n.community)).concat([groupNode])
-    : nodes;
+    ? L.nodes.filter(n => !L.isolatedIds.has(n.community)).concat([L.groupNode])
+    : L.nodes;
+
+  visible.forEach(n => {
+    if (n.x === undefined) {
+      const p = prev.get(n.id);
+      if (p) { n.x = p.x; n.y = p.y; }
+    }
+  });
+
+  linkEl = linksG.selectAll('path.link').data(L.links).join('path')
+    .attr('class', 'link')
+    .attr('stroke-width', d => Math.max(1.5, Math.sqrt(d.weight) * 1.8));
+
+  linkHit = linksG.selectAll('path.link-hit').data(L.links).join('path')
+    .attr('class', 'link-hit')
+    .on('click', (e, d) => { e.stopPropagation(); selectPair(pairOf(d)); });
 
   nodeEl = nodesG.selectAll('g.node').data(visible, d => d.id).join(
-    enter => enter.append('g').attr('class', 'node').call(drawNode).call(drag),
+    enter => enter.append('g').attr('class', 'node').call(drag),
   );
+  nodeEl.selectAll('*').remove();
+  nodeEl.call(drawNode);
 
   nodeEl
     .on('mouseover', (e, d) => {
@@ -378,7 +426,7 @@ function drawGraph() {
         tooltip.innerHTML = '<strong>Isolated classes</strong><br>' + d.size + ' classes without any dependency';
         return;
       }
-      const c = commById.get(d.community);
+      const c = L.commById.get(d.community);
       tooltip.innerHTML =
         '<strong>' + esc(commLabel(c)) + '</strong><br>' +
         esc(c.namespace) + '<br>' +
@@ -394,7 +442,7 @@ function drawGraph() {
   nodeEl.selectAll('text').style('display', showLabels ? null : 'none');
 
   sim.nodes(visible);
-  sim.force('link').links(links);
+  sim.force('link').links(L.links);
   sim.alpha(0.5).restart();
 }
 
@@ -484,8 +532,8 @@ function renderLinkPanel() {
     return;
   }
   const [a, b] = selectedPair.split('|').map(Number);
-  const directions = links.filter(l => pairOf(l) === selectedPair);
-  const name = id => esc(commLabel(commById.get(id)));
+  const directions = L.links.filter(l => pairOf(l) === selectedPair);
+  const name = id => esc(commLabel(L.commById.get(id)));
 
   let html = '<h2>' + name(a) + (directions.length === 2 ? ' ⇄ ' : ' – ') + name(b) + '</h2>';
   directions.forEach(l => {
@@ -513,12 +561,10 @@ document.getElementById('btn-labels').addEventListener('click', function() {
 });
 
 const btnIsolated = document.getElementById('btn-isolated');
-btnIsolated.hidden = isolatedIds.size < 2;
-btnIsolated.classList.toggle('active', groupIsolated);
 btnIsolated.addEventListener('click', function() {
   groupIsolated = !groupIsolated;
   this.classList.toggle('active', groupIsolated);
-  if (selected !== null && (selected === ISOLATED || isolatedIds.has(selected))) selected = null;
+  if (selected !== null && (selected === ISOLATED || L.isolatedIds.has(selected))) selected = null;
   drawGraph();
   refresh();
 });
@@ -532,10 +578,13 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 });
 
 // Stats bar
-document.getElementById('statsbar').textContent =
-  'Q = ' + meta.modularity.toFixed(4) +
-  '  ·  ' + meta.community_count + ' communities' +
-  '  ·  ' + links.length + ' inter-community links';
+function renderStats() {
+  document.getElementById('statsbar').textContent =
+    'Iteration ' + L.level + '/' + levels.length +
+    '  ·  Q = ' + L.modularity.toFixed(4) +
+    '  ·  ' + L.community_count + ' communities' +
+    '  ·  ' + L.links.length + ' inter-community links';
+}
 
 // Resize
 window.addEventListener('resize', () => {
@@ -546,7 +595,7 @@ window.addEventListener('resize', () => {
 // ── Tree panel ──────────────────────────────────────────────────────────────
 function buildNamespaceTree() {
   const root = {};
-  communities.forEach(c => {
+  L.communities.forEach(c => {
     c.members.forEach(fqn => {
       const parts = fqn.split('\\');
       let node = root;
@@ -573,7 +622,7 @@ function sortedEntries(node) {
 function folderMajority(node) {
   const counts = new Map();
   Object.values(node).forEach(v => {
-    if (v.__leaf && !isolatedIds.has(v.commId)) counts.set(v.commId, (counts.get(v.commId) || 0) + 1);
+    if (v.__leaf && !L.isolatedIds.has(v.commId)) counts.set(v.commId, (counts.get(v.commId) || 0) + 1);
   });
   let best = null, bestCount = 0;
   counts.forEach((n, id) => { if (n > bestCount) { best = id; bestCount = n; } });
@@ -584,11 +633,11 @@ function folderMajority(node) {
 function renderTreeNode(name, node, depth, majority) {
   const pad = 'padding-left:' + (depth * 14 + 8) + 'px';
   if (node.__leaf) {
-    const misplaced = majority !== null && !isolatedIds.has(node.commId) && node.commId !== majority;
+    const misplaced = majority !== null && !L.isolatedIds.has(node.commId) && node.commId !== majority;
     const dot = '<span class="leaf-dot"></span>';
     const tag = misplaced
-      ? '<span class="misplaced-tag" title="Most classes of this folder are in ' + esc(commLabel(commById.get(majority))) + '">' +
-        'in ' + esc(commLabel(commById.get(node.commId))) + '</span>'
+      ? '<span class="misplaced-tag" title="Most classes of this folder are in ' + esc(commLabel(L.commById.get(majority))) + '">' +
+        'in ' + esc(commLabel(L.commById.get(node.commId))) + '</span>'
       : '';
     return ['<div class="tree-leaf' + (misplaced ? ' misplaced' : '') + '" data-comm-id="' + node.commId + '" style="' + pad + '" title="' +
       esc(node.fqn) + '">' + dot + esc(name) + tag + '</div>', misplaced];
@@ -609,8 +658,11 @@ function renderTreeNode(name, node, depth, majority) {
 }
 
 const treeContent = document.getElementById('tree-content');
-const treeRoot = buildNamespaceTree();
-treeContent.innerHTML = sortedEntries(treeRoot).map(([k, v]) => renderTreeNode(k, v, 0, folderMajority(treeRoot).majority)[0]).join('');
+
+function renderTree() {
+  const treeRoot = buildNamespaceTree();
+  treeContent.innerHTML = sortedEntries(treeRoot).map(([k, v]) => renderTreeNode(k, v, 0, folderMajority(treeRoot).majority)[0]).join('');
+}
 
 document.getElementById('only-misplaced').addEventListener('change', e => {
   treeContent.classList.toggle('only-misplaced', e.target.checked);
@@ -625,8 +677,32 @@ treeContent.addEventListener('click', e => {
   if (card) card.scrollIntoView({ block: 'nearest' });
 });
 
-drawGraph();
-refresh();
+// ── Iterations ─────────────────────────────────────────────────────────────
+const slider    = document.getElementById('iter-slider');
+const iterLabel = document.getElementById('iter-label');
+
+function showLevel(idx) {
+  L             = levelContext(levels[idx]);
+  groupIsolated = L.isolatedIds.size > 1;
+  selected      = null;
+  selectedPair  = null;
+  btnIsolated.hidden = L.isolatedIds.size < 2;
+  btnIsolated.classList.toggle('active', groupIsolated);
+  slider.value = String(idx + 1);
+  iterLabel.textContent = L.level + ' / ' + levels.length;
+  renderMeta();
+  renderStats();
+  renderTree();
+  renderLinkPanel();
+  drawGraph();
+  refresh();
+}
+
+slider.max = String(levels.length);
+slider.addEventListener('input', () => showLevel(parseInt(slider.value, 10) - 1));
+if (levels.length < 2) document.getElementById('iterbar').style.display = 'none';
+
+showLevel(levels.length - 1);
 })();
 </script>
 </body>

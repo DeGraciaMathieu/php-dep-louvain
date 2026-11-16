@@ -14,20 +14,32 @@ final class HtmlRenderer
     private const TEMPLATE = __DIR__ . '/../../resources/graph.html';
 
     /**
-     * @param array{meta: array<string, mixed>, communities: list<array<string, mixed>>} $report
-     * @param int[] $community
+     * Render every Louvain level, so the page can replay the iterations.
+     *
+     * @param list<array{report: array{meta: array<string, mixed>, communities: list<array<string, mixed>>}, community: int[]}> $levels
      */
-    public static function render(array $report, Graph $g, array $community): string
+    public static function render(array $levels, Graph $g): string
     {
+        $lastMeta = $levels[array_key_last($levels)]['report']['meta'];
+
         $data = [
-            'meta'        => $report['meta'],
-            'nodes'       => self::nodes($report['communities']),
-            'links'       => self::links($g, $community),
-            'communities' => $report['communities'],
+            'meta' => [
+                'analyzed_path'       => $lastMeta['analyzed_path'],
+                'node_count'          => $lastMeta['node_count'],
+                'internal_node_count' => $lastMeta['internal_node_count'],
+            ],
+            'levels' => array_map(fn(array $level, int $i) => [
+                'level'           => $i + 1,
+                'modularity'      => $level['report']['meta']['modularity'],
+                'community_count' => $level['report']['meta']['community_count'],
+                'nodes'           => self::nodes($level['report']['communities']),
+                'links'           => self::links($g, $level['community']),
+                'communities'     => $level['report']['communities'],
+            ], $levels, array_keys($levels)),
         ];
 
         return strtr((string) file_get_contents(self::TEMPLATE), [
-            '{{TITLE}}' => htmlspecialchars($report['meta']['analyzed_path']),
+            '{{TITLE}}' => htmlspecialchars($lastMeta['analyzed_path']),
             '{{DATA}}'  => json_encode($data, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
         ]);
     }

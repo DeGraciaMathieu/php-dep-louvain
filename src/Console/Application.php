@@ -35,12 +35,13 @@ final class Application
         }
 
         $g          = GraphBuilder::fromAnalysis($analysis, $options['internalOnly']);
-        $community  = Louvain::detect($g, $options['maxLevels']);
+        $partitions = Louvain::detectLevels($g, $options['maxLevels']);
+        $community  = $partitions[array_key_last($partitions)];
         $modularity = Louvain::modularity($g, $community);
 
         $output = match ($options['format']) {
             'text' => TextRenderer::render($g, $community, $modularity),
-            'html' => HtmlRenderer::render($this->report($options['path'], $g, $community, $modularity), $g, $community),
+            'html' => HtmlRenderer::render($this->levels($options['path'], $g, $partitions), $g),
             'json' => json_encode(
                 $this->report($options['path'], $g, $community, $modularity),
                 JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR,
@@ -61,6 +62,20 @@ final class Application
     private function report(string $path, Graph $g, array $community, float $modularity): array
     {
         return ReportBuilder::build((string) realpath($path), $g, $community, $modularity);
+    }
+
+    /**
+     * Describe each Louvain level for the HTML page.
+     *
+     * @param list<int[]> $partitions
+     * @return list<array{report: array{meta: array<string, mixed>, communities: list<array<string, mixed>>}, community: int[]}>
+     */
+    private function levels(string $path, Graph $g, array $partitions): array
+    {
+        return array_map(fn(array $community) => [
+            'report'    => $this->report($path, $g, $community, Louvain::modularity($g, $community)),
+            'community' => $community,
+        ], $partitions);
     }
 
     /**
