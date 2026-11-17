@@ -67,6 +67,14 @@ svg{width:100%;height:100%}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lcycle{margin-top:10px;padding:6px 8px;border-radius:6px;background:#fff3e0;color:#9a4b00}
 
+/* ── Iteration slider ── */
+#iterbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+  background:#fff;border:1px solid #dee2e6;border-radius:6px;padding:8px 14px;
+  display:flex;align-items:center;gap:10px;font-size:12px;color:#495057;
+  box-shadow:0 1px 3px rgba(0,0,0,.07)}
+#iterbar input{width:160px}
+#iter-label{font-weight:600;color:#212529;white-space:nowrap}
+
 /* ── Controls ── */
 #controls{position:absolute;bottom:16px;right:16px;display:flex;gap:6px}
 #controls button{background:#fff;border:1px solid #dee2e6;border-radius:6px;
@@ -74,6 +82,12 @@ svg{width:100%;height:100%}
 #controls button:hover{background:#f1f3f5}
 #controls button.active{background:#e9ecef;font-weight:600}
 #controls button[hidden]{display:none}
+#wfilter{background:#fff;border:1px solid #dee2e6;border-radius:6px;
+  padding:6px 10px;font-size:12px;color:#495057;display:flex;align-items:center;gap:6px;
+  box-shadow:0 1px 3px rgba(0,0,0,.07)}
+#wfilter input{width:90px}
+#wfilter[hidden]{display:none}
+#wmin-val{font-weight:600;color:#212529;min-width:14px;text-align:right}
 
 /* ── Stats bar ── */
 #statsbar{position:absolute;top:12px;right:12px;background:rgba(255,255,255,.9);
@@ -128,7 +142,13 @@ svg{width:100%;height:100%}
     <button id="link-close" title="Close">×</button>
     <div id="link-content"></div>
   </div>
+  <div id="iterbar">
+    <span>Iteration</span>
+    <input type="range" id="iter-slider" min="1" step="1">
+    <span id="iter-label"></span>
+  </div>
   <div id="controls">
+    <label id="wfilter" title="Hide the links made of fewer dependencies">Links ≥ <span id="wmin-val">1</span><input type="range" id="wmin" min="1" value="1" step="1"></label>
     <button id="btn-isolated" class="active">Group isolated</button>
     <button id="btn-labels" class="active">Labels</button>
     <button id="btn-reset">⟳ Reset</button>
@@ -155,7 +175,12 @@ const COLORS = [
 const ISOLATED_COLOR = '#adb5bd';
 const ISOLATED = 'isolated';
 
-const { nodes, links, communities, meta } = DATA;
+// Hover colors: what the hovered community uses, what uses it, and mutual pairs
+const OUT_COLOR   = '#e15759';
+const IN_COLOR    = '#4e79a7';
+const CYCLE_COLOR = '#9a4b00';
+
+const { meta, levels } = DATA;
 
 function color(commId) { return COLORS[commId % COLORS.length]; }
 function shortName(fqcn) { return fqcn.split('\\').pop(); }
@@ -168,39 +193,62 @@ function percent(x) { return Math.round(x * 100) + ' %'; }
 function baseLabel(c) {
   return c.namespace && c.namespace !== '(root)' ? shortName(c.namespace) : 'Community';
 }
-const labelCount = new Map();
-communities.forEach(c => labelCount.set(baseLabel(c), (labelCount.get(baseLabel(c)) || 0) + 1));
-function commLabel(c) {
-  return labelCount.get(baseLabel(c)) > 1 ? baseLabel(c) + ' #' + c.id : baseLabel(c);
+
+/** Everything the page derives from one level's partition, built once per level. */
+function levelContext(levelData) {
+  if (levelData.ctx) return levelData.ctx;
+  const { nodes, links, communities } = levelData;
+
+  const labelCount = new Map();
+  communities.forEach(c => labelCount.set(baseLabel(c), (labelCount.get(baseLabel(c)) || 0) + 1));
+
+  // A community of one class that no link touches: grouped into one node to keep the map readable
+  const linkedComms = new Set();
+  links.forEach(l => {
+    linkedComms.add(+l.source.split('-').pop());
+    linkedComms.add(+l.target.split('-').pop());
+  });
+  const isolatedIds = new Set(communities.filter(c => c.size === 1 && !linkedComms.has(c.id)).map(c => c.id));
+  const isolatedMembers = communities.filter(c => isolatedIds.has(c.id)).flatMap(c => [...c.members, ...c.external_members]);
+
+  return levelData.ctx = {
+    level:           levelData.level,
+    modularity:      levelData.modularity,
+    community_count: levelData.community_count,
+    nodes, links, communities,
+    labelCount,
+    commById:        new Map(communities.map(c => [c.id, c])),
+    isolatedIds,
+    isolatedMembers,
+    groupNode:       { id: ISOLATED, isolatedGroup: true, size: isolatedIds.size },
+    maxWeight:       d3.max(links, d => d.weight) || 1,
+    directedKeys:    new Set(links.map(l => l.source + '>' + l.target)),
+  };
 }
 
-const commById = new Map(communities.map(c => [c.id, c]));
-
-// A community of one class that no link touches: grouped into one node to keep the map readable
-const linkedComms = new Set();
-links.forEach(l => {
-  linkedComms.add(+l.source.split('-').pop());
-  linkedComms.add(+l.target.split('-').pop());
-});
-const isolatedIds = new Set(communities.filter(c => c.size === 1 && !linkedComms.has(c.id)).map(c => c.id));
-const isolatedMembers = communities.filter(c => isolatedIds.has(c.id)).flatMap(c => [...c.members, ...c.external_members]);
-const groupNode = { id: ISOLATED, isolatedGroup: true, size: isolatedIds.size };
-
-let groupIsolated = isolatedIds.size > 1;
+let L             = null; // context of the level on display
+let groupIsolated = false;
 let selected      = null; // community id, ISOLATED, or null
 let selectedPair  = null; // "a|b" community pair of the selected link, or null
+let hovered       = null; // node datum under the cursor, or null
+
+function commLabel(c) {
+  return L.labelCount.get(baseLabel(c)) > 1 ? baseLabel(c) + ' #' + c.id : baseLabel(c);
+}
 
 /** The id under which a community is shown: isolated ones fold into the group when grouped. */
 function shownAs(commId) {
-  return groupIsolated && isolatedIds.has(commId) ? ISOLATED : commId;
+  return groupIsolated && L.isolatedIds.has(commId) ? ISOLATED : commId;
 }
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-document.getElementById('meta-info').innerHTML =
-  '<div class="meta-line"><span class="badge">Q ' + meta.modularity.toFixed(4) + '</span>' +
-  '<span class="badge">' + meta.community_count + ' communities</span></div>' +
-  '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
-  '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+function renderMeta() {
+  document.getElementById('meta-info').innerHTML =
+    '<div class="meta-line"><span class="badge">Q ' + L.modularity.toFixed(4) + '</span>' +
+    '<span class="badge">' + L.community_count + ' communities</span></div>' +
+    '<div class="meta-line"><span class="badge">' + meta.internal_node_count + ' classes</span>' +
+    '<span class="badge">' + meta.node_count + ' nodes</span></div>';
+}
 
 const list   = document.getElementById('community-list');
 const search = document.getElementById('search');
@@ -220,7 +268,7 @@ function hitRows(members, q) {
 
 function renderCards() {
   const q = search.value.trim().toLowerCase();
-  const cards = communities.filter(c => !groupIsolated || !isolatedIds.has(c.id)).map(c => ({
+  const cards = L.communities.filter(c => !groupIsolated || !L.isolatedIds.has(c.id)).map(c => ({
     key:      c.id,
     color:    color(c.id),
     title:    commLabel(c),
@@ -235,10 +283,10 @@ function renderCards() {
       key:      ISOLATED,
       color:    ISOLATED_COLOR,
       title:    'Isolated classes',
-      sub:      isolatedMembers.length + ' classes without any dependency',
+      sub:      L.isolatedMembers.length + ' classes without any dependency',
       cohesion: null,
-      members:  isolatedMembers,
-      rows:     memberRows(isolatedMembers, false),
+      members:  L.isolatedMembers,
+      rows:     memberRows(L.isolatedMembers, false),
     });
   }
 
@@ -278,13 +326,18 @@ const zoomBehavior = d3.zoom()
 svg.call(zoomBehavior);
 
 const defs = svg.append('defs');
-function addArrow(id, fill) {
+function addArrow(id, fill, orient) {
   defs.append('marker').attr('id', id).attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
-    .attr('markerUnits', 'userSpaceOnUse').attr('markerWidth', 10).attr('markerHeight', 10).attr('orient', 'auto')
+    .attr('markerUnits', 'userSpaceOnUse').attr('markerWidth', 10).attr('markerHeight', 10)
+    .attr('orient', orient ?? 'auto')
     .append('path').attr('d', 'M0,0L10,5L0,10z').attr('fill', fill);
 }
 addArrow('arrow', '#adb5bd');
 addArrow('arrow-selected', '#212529');
+addArrow('arrow-out', OUT_COLOR);
+addArrow('arrow-in', IN_COLOR);
+addArrow('arrow-cycle', CYCLE_COLOR);
+addArrow('arrow-cycle-start', CYCLE_COLOR, 'auto-start-reverse');
 COLORS.forEach((c, i) => addArrow('arrow-' + i, c));
 
 const root   = svg.append('g');
@@ -292,12 +345,10 @@ const linksG = root.append('g');
 const nodesG = root.append('g');
 
 // ── Force simulation ───────────────────────────────────────────────────────
-const maxWeight = d3.max(links, d => d.weight) || 1;
-
 const sim = d3.forceSimulation()
   .force('link',    d3.forceLink().id(d => d.id)
-                      .distance(d => 170 - d.weight / maxWeight * 60)
-                      .strength(d => 0.3 + d.weight / maxWeight * 0.4))
+                      .distance(d => 170 - d.weight / L.maxWeight * 60)
+                      .strength(d => 0.3 + d.weight / L.maxWeight * 0.4))
   .force('charge',  d3.forceManyBody().strength(d => -600 - d.size * 10))
   .force('center',  d3.forceCenter(W / 2, H / 2))
   .force('collide', d3.forceCollide(d => nodeRadius(d) + RING_GAP + 10));
@@ -305,25 +356,40 @@ const sim = d3.forceSimulation()
 // ── Links ──────────────────────────────────────────────────────────────────
 function pairOf(d) { return [d.source.community, d.target.community].sort((a, b) => a - b).join('|'); }
 
-const linkEl = linksG.selectAll('path.link').data(links).join('path')
-  .attr('class', 'link')
-  .attr('stroke-width', d => Math.max(1.5, Math.sqrt(d.weight) * 1.8));
-
-const linkHit = linksG.selectAll('path.link-hit').data(links).join('path')
-  .attr('class', 'link-hit')
-  .on('click', (e, d) => { e.stopPropagation(); selectPair(pairOf(d)); });
+let linkEl  = linksG.selectAll('path.link');
+let linkHit = linksG.selectAll('path.link-hit');
 
 function towards(n, x, y, r) {
   const dx = x - n.x, dy = y - n.y, len = Math.hypot(dx, dy) || 1;
   return [n.x + dx / len * r, n.y + dy / len * r];
 }
 
-/** A curve bent to the left of its direction, so the two directions of a pair do not overlap. */
+function isCycleLink(l) { return L.directedKeys.has(l.target.id + '>' + l.source.id); }
+
+/** While its node is hovered, a cycle pair collapses into this one link, two-headed. */
+function mergedCycle(l) {
+  return hovered !== null && l.source.id === hovered.id && isCycleLink(l);
+}
+
+/**
+ * A one-way dependency is drawn straight; only when the two directions of a
+ * pair both exist does each bend slightly to the left, so they do not overlap.
+ */
 function linkPath(d) {
   const s = d.source, t = d.target;
+  if (mergedCycle(d)) {
+    const [sx, sy] = towards(s, t.x, t.y, nodeRadius(s) + RING_GAP + 3);
+    const [tx, ty] = towards(t, s.x, s.y, nodeRadius(t) + RING_GAP + 3);
+    return 'M' + sx + ',' + sy + 'L' + tx + ',' + ty;
+  }
+  if (!isCycleLink(d)) {
+    const [sx, sy] = towards(s, t.x, t.y, nodeRadius(s));
+    const [tx, ty] = towards(t, s.x, s.y, nodeRadius(t) + RING_GAP + 3);
+    return 'M' + sx + ',' + sy + 'L' + tx + ',' + ty;
+  }
   const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1;
-  const cx = (s.x + t.x) / 2 - dy / len * len * 0.15;
-  const cy = (s.y + t.y) / 2 + dx / len * len * 0.15;
+  const cx = (s.x + t.x) / 2 - dy / len * len * 0.08;
+  const cy = (s.y + t.y) / 2 + dx / len * len * 0.08;
   const [sx, sy] = towards(s, cx, cy, nodeRadius(s));
   const [tx, ty] = towards(t, cx, cy, nodeRadius(t) + RING_GAP + 3);
   return 'M' + sx + ',' + sy + 'Q' + cx + ',' + cy + ' ' + tx + ',' + ty;
@@ -353,7 +419,7 @@ function drawNode(g) {
         .attr('stroke-dasharray', (d.cohesion * circ) + ' ' + circ).attr('transform', 'rotate(-90)');
     }
     el.append('text').attr('class', 'label').attr('dy', '-0.2em').attr('text-anchor', 'middle')
-      .text(d.isolatedGroup ? 'Isolated' : commLabel(commById.get(d.community)));
+      .text(d.isolatedGroup ? 'Isolated' : commLabel(L.commById.get(d.community)));
     el.append('text').attr('class', 'sub').attr('dy', '1em').attr('text-anchor', 'middle')
       .text(d.isolatedGroup ? d.size + ' cls' : d.size + ' cls · ' + percent(d.cohesion));
   });
@@ -363,22 +429,44 @@ const tooltip = document.getElementById('tooltip');
 let nodeEl = nodesG.selectAll('g.node');
 
 function drawGraph() {
+  // Keep the layout readable across levels: a community kept from the level
+  // shown before starts from its previous position
+  const prev = new Map(sim.nodes().map(d => [d.id, d]));
+
   const visible = groupIsolated
-    ? nodes.filter(n => !isolatedIds.has(n.community)).concat([groupNode])
-    : nodes;
+    ? L.nodes.filter(n => !L.isolatedIds.has(n.community)).concat([L.groupNode])
+    : L.nodes;
+
+  visible.forEach(n => {
+    if (n.x === undefined) {
+      const p = prev.get(n.id);
+      if (p) { n.x = p.x; n.y = p.y; }
+    }
+  });
+
+  linkEl = linksG.selectAll('path.link').data(L.links).join('path')
+    .attr('class', 'link')
+    .attr('stroke-width', d => Math.max(1.5, Math.sqrt(d.weight) * 1.8));
+
+  linkHit = linksG.selectAll('path.link-hit').data(L.links).join('path')
+    .attr('class', 'link-hit')
+    .on('click', (e, d) => { e.stopPropagation(); selectPair(pairOf(d)); });
 
   nodeEl = nodesG.selectAll('g.node').data(visible, d => d.id).join(
-    enter => enter.append('g').attr('class', 'node').call(drawNode).call(drag),
+    enter => enter.append('g').attr('class', 'node').call(drag),
   );
+  nodeEl.selectAll('*').remove();
+  nodeEl.call(drawNode);
 
   nodeEl
     .on('mouseover', (e, d) => {
+      hoverFocus(d);
       tooltip.style.display = 'block';
       if (d.isolatedGroup) {
         tooltip.innerHTML = '<strong>Isolated classes</strong><br>' + d.size + ' classes without any dependency';
         return;
       }
-      const c = commById.get(d.community);
+      const c = L.commById.get(d.community);
       tooltip.innerHTML =
         '<strong>' + esc(commLabel(c)) + '</strong><br>' +
         esc(c.namespace) + '<br>' +
@@ -389,12 +477,12 @@ function drawGraph() {
       tooltip.style.left = (e.clientX - r.left + 14) + 'px';
       tooltip.style.top  = (e.clientY - r.top  - 14) + 'px';
     })
-    .on('mouseout', () => { tooltip.style.display = 'none'; });
+    .on('mouseout', () => { tooltip.style.display = 'none'; applyGraphStyles(); });
 
   nodeEl.selectAll('text').style('display', showLabels ? null : 'none');
 
   sim.nodes(visible);
-  sim.force('link').links(links);
+  sim.force('link').links(L.links);
   sim.alpha(0.5).restart();
 }
 
@@ -417,12 +505,23 @@ function selectPair(pair) {
   refresh();
 }
 
-function refresh() {
-  renderCards();
+/** A link's resting opacity grows with its weight, so the strong ones stand out. */
+function linkOpacity(d) {
+  return 0.12 + 0.68 * Math.sqrt(d.weight / L.maxWeight);
+}
+
+function applyGraphStyles() {
+  hovered = null;
+
+  linkEl.style('display',  d => d.weight >= minWeight ? null : 'none');
+  linkHit.style('display', d => d.weight >= minWeight ? null : 'none');
+  linkEl.attr('marker-start', null).attr('d', linkPath);
+  linkHit.attr('d', linkPath);
 
   nodeEl.select('circle.disc')
     .attr('fill-opacity',   d => selected === null ? 0.85 : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 0.95 : 0.15))
     .attr('stroke-opacity', d => selected === null ? 1    : ((d.isolatedGroup ? ISOLATED : d.community) === selected ? 1    : 0.2));
+  nodeEl.selectAll('text').style('opacity', null);
 
   linkEl
     .attr('stroke', d => {
@@ -431,8 +530,8 @@ function refresh() {
       return '#ced4da';
     })
     .attr('stroke-opacity', d => {
-      if (selectedPair !== null) return pairOf(d) === selectedPair ? 1 : 0.15;
-      if (selected === null) return 0.7;
+      if (selectedPair !== null) return pairOf(d) === selectedPair ? 1 : 0.1;
+      if (selected === null) return linkOpacity(d);
       return d.source.community === selected || d.target.community === selected ? 0.9 : 0.05;
     })
     .attr('marker-end', d => {
@@ -442,6 +541,49 @@ function refresh() {
       }
       return 'url(#arrow)';
     });
+}
+
+/**
+ * While a node is hovered, only its neighbourhood keeps its ink: what it uses
+ * in red, what uses it in blue, and each cycle pair as one two-headed link.
+ */
+function hoverFocus(d) {
+  hovered = d;
+
+  const nbr = new Set([d.id]);
+  L.links.forEach(l => {
+    if (l.weight < minWeight) return;
+    if (l.source.id === d.id) nbr.add(l.target.id);
+    if (l.target.id === d.id) nbr.add(l.source.id);
+  });
+  const touches = l => l.source.id === d.id || l.target.id === d.id;
+  // The reverse half of a touched cycle pair folds into the merged link
+  const foldedCycle = l => touches(l) && isCycleLink(l) && l.target.id === d.id;
+
+  nodeEl.select('circle.disc')
+    .attr('fill-opacity',   n => nbr.has(n.id) ? 0.95 : 0.12)
+    .attr('stroke-opacity', n => nbr.has(n.id) ? 1 : 0.15);
+  nodeEl.selectAll('text').style('opacity', n => nbr.has(n.id) ? null : 0.25);
+
+  linkEl
+    .style('display', l => l.weight < minWeight || foldedCycle(l) ? 'none' : null)
+    .attr('stroke', l => !touches(l) ? '#ced4da'
+      : isCycleLink(l) ? CYCLE_COLOR
+      : l.source.id === d.id ? OUT_COLOR : IN_COLOR)
+    .attr('stroke-opacity', l => touches(l) ? 0.95 : 0.04)
+    .attr('marker-end', l => !touches(l) ? 'url(#arrow)'
+      : isCycleLink(l) ? 'url(#arrow-cycle)'
+      : l.source.id === d.id ? 'url(#arrow-out)' : 'url(#arrow-in)')
+    .attr('marker-start', l => mergedCycle(l) ? 'url(#arrow-cycle-start)' : null)
+    .attr('d', linkPath);
+  linkHit
+    .style('display', l => l.weight < minWeight || foldedCycle(l) ? 'none' : null)
+    .attr('d', linkPath);
+}
+
+function refresh() {
+  renderCards();
+  applyGraphStyles();
 
   document.querySelectorAll('.tree-leaf').forEach(el => {
     const commId = parseInt(el.dataset.commId ?? '-1', 10);
@@ -484,8 +626,8 @@ function renderLinkPanel() {
     return;
   }
   const [a, b] = selectedPair.split('|').map(Number);
-  const directions = links.filter(l => pairOf(l) === selectedPair);
-  const name = id => esc(commLabel(commById.get(id)));
+  const directions = L.links.filter(l => pairOf(l) === selectedPair);
+  const name = id => esc(commLabel(L.commById.get(id)));
 
   let html = '<h2>' + name(a) + (directions.length === 2 ? ' ⇄ ' : ' – ') + name(b) + '</h2>';
   directions.forEach(l => {
@@ -505,6 +647,15 @@ document.getElementById('link-close').addEventListener('click', () => selectPair
 
 // ── Controls ───────────────────────────────────────────────────────────────
 let showLabels = true;
+let minWeight  = 1;
+
+const wmin    = document.getElementById('wmin');
+const wminVal = document.getElementById('wmin-val');
+wmin.addEventListener('input', () => {
+  minWeight = parseInt(wmin.value, 10);
+  wminVal.textContent = String(minWeight);
+  applyGraphStyles();
+});
 
 document.getElementById('btn-labels').addEventListener('click', function() {
   showLabels = !showLabels;
@@ -513,12 +664,10 @@ document.getElementById('btn-labels').addEventListener('click', function() {
 });
 
 const btnIsolated = document.getElementById('btn-isolated');
-btnIsolated.hidden = isolatedIds.size < 2;
-btnIsolated.classList.toggle('active', groupIsolated);
 btnIsolated.addEventListener('click', function() {
   groupIsolated = !groupIsolated;
   this.classList.toggle('active', groupIsolated);
-  if (selected !== null && (selected === ISOLATED || isolatedIds.has(selected))) selected = null;
+  if (selected !== null && (selected === ISOLATED || L.isolatedIds.has(selected))) selected = null;
   drawGraph();
   refresh();
 });
@@ -532,10 +681,13 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 });
 
 // Stats bar
-document.getElementById('statsbar').textContent =
-  'Q = ' + meta.modularity.toFixed(4) +
-  '  ·  ' + meta.community_count + ' communities' +
-  '  ·  ' + links.length + ' inter-community links';
+function renderStats() {
+  document.getElementById('statsbar').textContent =
+    'Iteration ' + L.level + '/' + levels.length +
+    '  ·  Q = ' + L.modularity.toFixed(4) +
+    '  ·  ' + L.community_count + ' communities' +
+    '  ·  ' + L.links.length + ' inter-community links';
+}
 
 // Resize
 window.addEventListener('resize', () => {
@@ -546,7 +698,7 @@ window.addEventListener('resize', () => {
 // ── Tree panel ──────────────────────────────────────────────────────────────
 function buildNamespaceTree() {
   const root = {};
-  communities.forEach(c => {
+  L.communities.forEach(c => {
     c.members.forEach(fqn => {
       const parts = fqn.split('\\');
       let node = root;
@@ -573,7 +725,7 @@ function sortedEntries(node) {
 function folderMajority(node) {
   const counts = new Map();
   Object.values(node).forEach(v => {
-    if (v.__leaf && !isolatedIds.has(v.commId)) counts.set(v.commId, (counts.get(v.commId) || 0) + 1);
+    if (v.__leaf && !L.isolatedIds.has(v.commId)) counts.set(v.commId, (counts.get(v.commId) || 0) + 1);
   });
   let best = null, bestCount = 0;
   counts.forEach((n, id) => { if (n > bestCount) { best = id; bestCount = n; } });
@@ -584,11 +736,11 @@ function folderMajority(node) {
 function renderTreeNode(name, node, depth, majority) {
   const pad = 'padding-left:' + (depth * 14 + 8) + 'px';
   if (node.__leaf) {
-    const misplaced = majority !== null && !isolatedIds.has(node.commId) && node.commId !== majority;
+    const misplaced = majority !== null && !L.isolatedIds.has(node.commId) && node.commId !== majority;
     const dot = '<span class="leaf-dot"></span>';
     const tag = misplaced
-      ? '<span class="misplaced-tag" title="Most classes of this folder are in ' + esc(commLabel(commById.get(majority))) + '">' +
-        'in ' + esc(commLabel(commById.get(node.commId))) + '</span>'
+      ? '<span class="misplaced-tag" title="Most classes of this folder are in ' + esc(commLabel(L.commById.get(majority))) + '">' +
+        'in ' + esc(commLabel(L.commById.get(node.commId))) + '</span>'
       : '';
     return ['<div class="tree-leaf' + (misplaced ? ' misplaced' : '') + '" data-comm-id="' + node.commId + '" style="' + pad + '" title="' +
       esc(node.fqn) + '">' + dot + esc(name) + tag + '</div>', misplaced];
@@ -609,8 +761,11 @@ function renderTreeNode(name, node, depth, majority) {
 }
 
 const treeContent = document.getElementById('tree-content');
-const treeRoot = buildNamespaceTree();
-treeContent.innerHTML = sortedEntries(treeRoot).map(([k, v]) => renderTreeNode(k, v, 0, folderMajority(treeRoot).majority)[0]).join('');
+
+function renderTree() {
+  const treeRoot = buildNamespaceTree();
+  treeContent.innerHTML = sortedEntries(treeRoot).map(([k, v]) => renderTreeNode(k, v, 0, folderMajority(treeRoot).majority)[0]).join('');
+}
 
 document.getElementById('only-misplaced').addEventListener('change', e => {
   treeContent.classList.toggle('only-misplaced', e.target.checked);
@@ -625,8 +780,37 @@ treeContent.addEventListener('click', e => {
   if (card) card.scrollIntoView({ block: 'nearest' });
 });
 
-drawGraph();
-refresh();
+// ── Iterations ─────────────────────────────────────────────────────────────
+const slider    = document.getElementById('iter-slider');
+const iterLabel = document.getElementById('iter-label');
+
+function showLevel(idx) {
+  L             = levelContext(levels[idx]);
+  groupIsolated = L.isolatedIds.size > 1;
+  selected      = null;
+  selectedPair  = null;
+  minWeight     = 1;
+  wmin.value    = '1';
+  wmin.max      = String(Math.max(2, L.maxWeight));
+  wminVal.textContent = '1';
+  document.getElementById('wfilter').hidden = L.maxWeight < 2;
+  btnIsolated.hidden = L.isolatedIds.size < 2;
+  btnIsolated.classList.toggle('active', groupIsolated);
+  slider.value = String(idx + 1);
+  iterLabel.textContent = L.level + ' / ' + levels.length;
+  renderMeta();
+  renderStats();
+  renderTree();
+  renderLinkPanel();
+  drawGraph();
+  refresh();
+}
+
+slider.max = String(levels.length);
+slider.addEventListener('input', () => showLevel(parseInt(slider.value, 10) - 1));
+if (levels.length < 2) document.getElementById('iterbar').style.display = 'none';
+
+showLevel(levels.length - 1);
 })();
 </script>
 </body>
